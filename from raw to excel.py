@@ -37,6 +37,14 @@ def style_data(cell, highlight=None):
     elif highlight == "vsl":
         cell.fill = YELLOW_FILL
 
+def norm_name(s: str) -> str:
+    """Normalize compound names to improve matching between ALS and threshold file."""
+    s = "" if s is None else str(s)
+    s = s.strip().lower()
+    s = s.replace("\xa0", " ").replace("–", "-").replace("—", "-")
+    s = re.sub(r"\s+", " ", s)
+    return s
+
 def parse_als_file(file_bytes, filename):
     try:
         wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
@@ -69,7 +77,7 @@ def parse_als_file(file_bytes, filename):
 
     header_row_idx = None
     for i, row in enumerate(all_rows):
-        if row[0] == "Parameter":
+        if row and len(row) > 0 and row[0] == "Parameter":
             header_row_idx = i
             break
     if header_row_idx is None:
@@ -79,9 +87,9 @@ def parse_als_file(file_bytes, filename):
     current_group = "Unknown"
 
     for row in all_rows[header_row_idx + 1:]:
-        param  = row[0]
-        method = row[1]
-        unit   = row[2]
+        param  = row[0] if len(row) > 0 else None
+        method = row[1] if len(row) > 1 else None
+        unit   = row[2] if len(row) > 2 else None
 
         if not param:
             continue
@@ -136,6 +144,13 @@ selected_tier1 = st.sidebar.selectbox(
     options=list(tier1_options.keys()),
     format_func=lambda x: f"{x.capitalize()} ({tier1_options[x]})"
 )
+
+tier_mode = st.sidebar.selectbox(
+    "בחר מצב Tier 1 להשוואה",
+    options=["a", "b", "very_high"],
+    format_func=lambda x: {"a":"A (לפי עומק 0-6 / >6)","b":"B","very_high":"Very high"}[x]
+)
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("🟡 חריגה מעל VSL")
 st.sidebar.markdown("🟠 חריגה מעל TIER 1")
@@ -159,23 +174,59 @@ if threshold_file and data_files:
         with st.expander("🔍 עמודות בקובץ ערכי הסף"):
             st.write(list(df_thresh.columns))
 
-        comp_col  = next((c for c in df_thresh.columns if c in ["compound","parameter","תרכובת","name"]), None)
-        vsl_col   = next((c for c in df_thresh.columns if "vsl" in c), None)
-        tier1_col = next((c for c in df_thresh.columns if selected_tier1 in c.lower()), None)
-        if tier1_col is None:
-            tier1_col = next((c for c in df_thresh.columns if "tier" in c and "1" in c), None)
+        # ---- Identify columns in your threshold file (Version Dec 2024) ----
+        comp_aliases = {
+            "chemical","chemical name","compound","parameter","analyte","analyte name","name",
+            "תרכובת","חומר","מזהם"
+        }
+        comp_col = next((c for c in df_thresh.columns if c in comp_aliases), None)
+        vsl_col  = next((c for c in df_thresh.columns if c == "vsl" or "vsl" in c), None)
 
         if not comp_col or not vsl_col:
-            st.error(f"לא נמצאו עמודות נדרשות. נמצא: {list(df_thresh.columns)}")
+            st.error(f"לא נמצאו עמודות נדרשות (chemical/compound + vsl). נמצא: {list(df_thresh.columns)}")
             st.stop()
 
-        thresh_dict = {}
-        for _, row in df_thresh.iterrows():
-            name = str(row[comp_col]).strip().lower()
-            thresh_dict[name] = {
-                "vsl":   row.get(vsl_col),
-                "tier1": row.get(tier1_col) if tier1_col else None
+        # File has industrial/residential only. If user selects recreational, fallback to residential.
+        tier_key = selected_tier1
+        if tier_key == "recreational":
+            st.warning("⚠️ בקובץ ערכי הסף אין Recreational. משתמש ב-Residential כברירת מחדל.")
+            tier_key = "residential"
+
+        def find_col_contains(*parts):
+            return next((c for c in df_thresh.columns if all(p in c for p in parts)), None)
+
+        tier_cols = {
+            "b": {
+                "any": find_col_contains("tier 1", tier_key, " b"),
+            },
+            "a": {
+                "0_6": find_col_contains("tier 1", tier_key, "a 0-6m"),
+                "gt6": find_col_contains("tier 1", tier_key, "a >6m"),
+            },
+            "very_high": {
+                "any": find_col_contains("tier 1", tier_key, "very high"),
             }
+        }
+
+        # Build threshold dictionary
+        thresh_dict = {}
+        for _, r in df_thresh.iterrows():
+            key = norm_name(r.get(comp_col, ""))
+            if not key or key == "nan":
+                continue
+
+            entry = {"vsl": r.get(vsl_col)}
+
+            if tier_mode == "a":
+                entry["tier1_a_0_6"] = r.get(tier_cols["a"]["0_6"]) if tier_cols["a"]["0_6"] else None
+                entry["tier1_a_gt6"] = r.get(tier_cols["a"]["gt6"]) if tier_cols["a"]["gt6"] else None
+            elif tier_mode == "b":
+                entry["tier1_b"] = r.get(tier_cols["b"]["any"]) if tier_cols["b"]["any"] else None
+            else:
+                entry["tier1_vh"] = r.get(tier_cols["very_high"]["any"]) if tier_cols["very_high"]["any"] else None
+
+            thresh_dict[key] = entry
+
         st.success(f"✅ נטענו {len(thresh_dict)} ערכי סף")
 
     except Exception as e:
@@ -222,21 +273,36 @@ if threshold_file and data_files:
         ws.row_dimensions[2].height = 30
 
         for ri, (_, row) in enumerate(df_g.iterrows(), start=3):
-            compound_key = str(row["compound"]).strip().lower()
+            compound_key = norm_name(row["compound"])
             result_val   = row["result"]
-            thresh        = thresh_dict.get(compound_key, {})
-            vsl           = thresh.get("vsl")
-            tier1         = thresh.get("tier1")
+
+            thresh = thresh_dict.get(compound_key, {})
+            vsl    = thresh.get("vsl")
+
+            # tier1 value selection based on mode + depth
+            tier1 = None
+            if tier_mode == "a":
+                d = row["depth"]
+                if d is None:
+                    tier1 = thresh.get("tier1_a_0_6")  # default
+                elif d <= 6:
+                    tier1 = thresh.get("tier1_a_0_6")
+                else:
+                    tier1 = thresh.get("tier1_a_gt6")
+            elif tier_mode == "b":
+                tier1 = thresh.get("tier1_b")
+            else:
+                tier1 = thresh.get("tier1_vh")
 
             highlight = None
             status    = "תקין"
             try:
                 r = float(result_val)
-                if tier1 and pd.notna(tier1) and float(tier1) > 0 and r > float(tier1):
+                if tier1 is not None and pd.notna(tier1) and float(tier1) > 0 and r > float(tier1):
                     highlight = "tier1"
                     status    = "⚠️ חריגת TIER 1"
                     stats["tier1"] += 1
-                elif vsl and pd.notna(vsl) and float(vsl) > 0 and r > float(vsl):
+                elif vsl is not None and pd.notna(vsl) and float(vsl) > 0 and r > float(vsl):
                     highlight = "vsl"
                     status    = "⚡ חריגת VSL"
                     stats["vsl"] += 1
@@ -247,12 +313,13 @@ if threshold_file and data_files:
             values = [
                 row["sample_id"], row["depth"], row["compound"], row["unit"],
                 row.get("result_str", result_val),
-                vsl   if vsl   and pd.notna(vsl)   else "—",
-                tier1 if tier1 and pd.notna(tier1) else "—",
+                vsl   if vsl   is not None and pd.notna(vsl)   else "—",
+                tier1 if tier1 is not None and pd.notna(tier1) else "—",
                 status
             ]
             for ci, val in enumerate(values, 1):
                 c = ws.cell(row=ri, column=ci, value=val)
+                # highlight result + status cells only (keeps the sheet readable)
                 style_data(c, highlight if ci in [5, 8] else None)
 
         for ci, w in enumerate([14,10,28,10,12,12,16,18], 1):
