@@ -67,32 +67,73 @@ def safe_sheet_title(name, existing):
         i += 1
     return title[:31]
 
-def friendly_col_label(col: str) -> str:
-    """Pretty label for sidebar, but keeps original col key available."""
-    c = col.lower().strip()
-    c = c.replace("_", " ")
-    c = re.sub(r"\s+", " ", c)
-    # title-casing lightly while keeping tier / vsl readable
-    if c.startswith("tier"):
-        return c.upper().replace(" 1", " 1")
-    if c == "vsl" or " vsl" in c:
-        return c.upper()
-    if c.startswith("cas"):
-        return "CAS"
-    if c.startswith("chemical"):
-        return "Chemical"
-    return c
+def parse_threshold_columns(cols, comp_col):
+    """
+    Returns:
+      vsl_cols: list[str]
+      tier1_map: dict[landuse][level][depth_key] -> col_name
+        landuse: industrial/residential/recreational/other
+        level: a / b / very_high / other
+        depth_key: '0-6m' / '>6m' / 'any'
+    """
+    vsl_cols = []
+    tier1_map = {}
+
+    for c in cols:
+        if c == comp_col:
+            continue
+        cc = c.lower().strip()
+        cc = cc.replace("_", " ")
+        cc = re.sub(r"\s+", " ", cc)
+
+        if "vsl" in cc:
+            vsl_cols.append(c)
+            continue
+
+        if "tier" in cc and re.search(r"\b1\b", cc):
+            # Examples in your file:
+            # "tier 1 industrial a 0-6m"
+            # "tier 1 industrial a >6m"
+            # "tier 1 industrial b"
+            # "tier 1 industrial very high"
+            # same for residential
+            landuse = "other"
+            if "industrial" in cc:
+                landuse = "industrial"
+            elif "residential" in cc:
+                landuse = "residential"
+            elif "recreational" in cc:
+                landuse = "recreational"
+
+            level = "other"
+            if " very high" in cc or cc.endswith("very high") or "very high" in cc:
+                level = "very_high"
+            else:
+                # try a/b (as separate token)
+                if re.search(r"\ba\b", cc):
+                    level = "a"
+                elif re.search(r"\bb\b", cc):
+                    level = "b"
+
+            depth_key = "any"
+            if "0-6" in cc:
+                depth_key = "0-6m"
+            elif ">6" in cc or "6m" in cc and ">" in cc:
+                depth_key = ">6m"
+
+            tier1_map.setdefault(landuse, {}).setdefault(level, {})[depth_key] = c
+
+    return vsl_cols, tier1_map
 
 # --------------------------------------------------
-# ALS PARSER (minimal - keep your original if needed)
+# ALS PARSER
 # --------------------------------------------------
 def parse_als_file(file_bytes, filename):
     try:
         wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
     except Exception as e:
-        return None, f"שגיאה בפתיחת הקובץ: {e}"
+        return None, f"לא ניתן לפתוח: {e}"
 
-    # try to find client soil sheet, else first
     main_sheet = None
     for name in wb.sheetnames:
         if "Client" in name and "SOIL" in name:
@@ -135,8 +176,6 @@ def parse_als_file(file_bytes, filename):
 
         if not param:
             continue
-
-        # group row
         if param and not method and not unit:
             current_group = str(param).strip()
             continue
@@ -144,7 +183,6 @@ def parse_als_file(file_bytes, filename):
         for col_idx, sample_name in col_to_sample.items():
             val = row[col_idx] if col_idx < len(row) else None
 
-            # depth from sample name if exists like S12 (1.5)
             match = re.match(r"^(S-?\d+[A-Za-z]*)\s*\(([0-9.]+)\)", sample_name)
             if match:
                 sid   = match.group(1)
@@ -182,7 +220,7 @@ def parse_als_file(file_bytes, filename):
     return pd.DataFrame(records), None
 
 # --------------------------------------------------
-# UPLOADS
+# UPLOADS (MAIN AREA)
 # --------------------------------------------------
 col1, col2 = st.columns(2)
 with col1:
@@ -193,15 +231,20 @@ with col2:
     data_files = st.file_uploader("העלה קבצי ALS — אפשר כמה ביחד", type=["xlsx","xls"], accept_multiple_files=True, key="data")
 
 # --------------------------------------------------
-# SIDEBAR (dynamic - depends on threshold file)
+# SIDEBAR MENU (organized)
 # --------------------------------------------------
 st.sidebar.header("⚙️ הגדרות")
 
-if threshold_file is None:
-    st.sidebar.info("כדי לראות את כל האופציות (VSL / TIER 1 ...), קודם תעלה קובץ ערכי סף.")
+# Defaults (disabled controls until threshold file exists)
+disabled = threshold_file is None
+
+if disabled:
+    st.sidebar.info("כדי לבחור ערכי סף (VSL / TIER 1 ...), קודם תעלה קובץ ערכי סף.")
+    _ = st.sidebar.selectbox("סוג ערך סף", ["(העלה קובץ ערכי סף)"], disabled=True)
+    _ = st.sidebar.selectbox("בחירה", ["—"], disabled=True)
     st.stop()
 
-# read thresholds early for sidebar options
+# Read threshold file for menu + processing
 try:
     df_thresh = pd.read_excel(threshold_file)
 except Exception as e:
@@ -210,7 +253,7 @@ except Exception as e:
 
 df_thresh.columns = [str(c).lower().strip() for c in df_thresh.columns]
 
-# detect compound column
+# Detect compound column
 comp_aliases = {
     "chemical","chemical name","compound","parameter","analyte","analyte name","name",
     "תרכובת","חומר","מזהם"
@@ -221,56 +264,85 @@ if not comp_col:
     st.sidebar.write("עמודות שנמצאו:", list(df_thresh.columns))
     st.stop()
 
-# Build list of "threshold columns" user can select from: VSL + all Tier1 columns (and optionally more)
-threshold_cols = []
-for c in df_thresh.columns:
-    if c == comp_col:
-        continue
-    if "tier" in c and "1" in c:
-        threshold_cols.append(c)
-    elif "vsl" in c:
-        threshold_cols.append(c)
+vsl_cols, tier1_map = parse_threshold_columns(df_thresh.columns, comp_col)
 
-if not threshold_cols:
+# Sidebar selections
+threshold_type_options = []
+if vsl_cols:
+    threshold_type_options.append("VSL")
+if tier1_map:
+    threshold_type_options.append("TIER 1")
+
+if not threshold_type_options:
     st.sidebar.error("לא נמצאו עמודות VSL או TIER 1 בקובץ ערכי הסף.")
     st.sidebar.write("עמודות שנמצאו:", list(df_thresh.columns))
     st.stop()
 
-# Map pretty labels -> real col
-pretty_map = {friendly_col_label(c): c for c in threshold_cols}
-pretty_options = list(pretty_map.keys())
+threshold_type = st.sidebar.selectbox("מה לצבוע בכתום (ערך סף להשוואה)", threshold_type_options)
 
-default_choice = None
-for lbl, col in pretty_map.items():
-    if col == "vsl" or col.endswith(" vsl") or "vsl" in col:
-        default_choice = lbl
-        break
-if default_choice is None:
-    default_choice = pretty_options[0]
+# Always allow VSL yellow if exists
+use_vsl = False
+vsl_col = None
+if vsl_cols:
+    vsl_col = vsl_cols[0]
+    use_vsl = st.sidebar.checkbox("לחשב/להציג חריגות VSL (צהוב)", value=True)
+    if len(vsl_cols) > 1:
+        vsl_col = st.sidebar.selectbox("בחר עמודת VSL", vsl_cols, index=0)
 
-compare_label = st.sidebar.selectbox(
-    "בחר ערך סף להשוואה (יצבע כתום מעליו)",
-    options=pretty_options,
-    index=pretty_options.index(default_choice) if default_choice in pretty_options else 0
-)
-compare_col = pretty_map[compare_label]
+compare_col = None
+compare_label = None
 
-# VSL column (for yellow) - allow turning on/off
-vsl_candidates = [c for c in df_thresh.columns if "vsl" in c]
-vsl_col = vsl_candidates[0] if vsl_candidates else None
-use_vsl = st.sidebar.checkbox("להציג/לחשב חריגות VSL (צהוב)", value=(vsl_col is not None))
+if threshold_type == "VSL":
+    compare_col = vsl_col
+    compare_label = "VSL"
+else:
+    # Organized Tier 1 menu
+    landuses = sorted(tier1_map.keys())
+    landuse_labels = {
+        "industrial": "Industrial (תעשייתי)",
+        "residential": "Residential (מגורים)",
+        "recreational": "Recreational (נופש)",
+        "other": "Other"
+    }
+    landuse = st.sidebar.selectbox(
+        "סוג אתר (Land use)",
+        options=landuses,
+        format_func=lambda x: landuse_labels.get(x, x)
+    )
+
+    levels = sorted(tier1_map.get(landuse, {}).keys())
+    level_labels = {"a": "A", "b": "B", "very_high": "Very high", "other": "Other"}
+    level = st.sidebar.selectbox("רמה", options=levels, format_func=lambda x: level_labels.get(x, x))
+
+    depth_dict = tier1_map.get(landuse, {}).get(level, {})
+    depth_keys = sorted(depth_dict.keys())
+    # For A: show depth selection if exists
+    if level == "a" and ("0-6m" in depth_dict or ">6m" in depth_dict):
+        # Prefer 0-6 first
+        depth_order = [k for k in ["0-6m", ">6m", "any"] if k in depth_keys] + [k for k in depth_keys if k not in ["0-6m", ">6m", "any"]]
+        depth = st.sidebar.selectbox("עומק", options=depth_order, format_func=lambda x: {"0-6m":"0–6m", ">6m":">6m", "any":"כל"}.get(x, x))
+    else:
+        depth = "any" if "any" in depth_dict else (depth_keys[0] if depth_keys else None)
+
+    if depth is None:
+        st.sidebar.error("לא מצאתי עמודת Tier 1 מתאימה לשילוב שבחרת.")
+        st.stop()
+
+    compare_col = depth_dict.get(depth)
+    compare_label = f"TIER 1 {landuse_labels.get(landuse, landuse)} {level_labels.get(level, level)} {depth}".strip()
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("🟡 חריגה מעל VSL")
-st.sidebar.markdown("🟠 חריגה מעל ערך סף שנבחר למעלה")
+st.sidebar.markdown("🟠 חריגה מעל ערך הסף שנבחר")
 
 # --------------------------------------------------
-# MAIN LOGIC
+# MAIN LOGIC (requires ALS files too)
 # --------------------------------------------------
 if not data_files:
     st.info("👆 העלה גם קבצי ALS כדי להתחיל לעבד.")
     st.stop()
 
-# Build threshold dict: compound -> values for vsl + chosen compare_col
+# Build threshold dict: compound -> vsl + compare
 thresh_dict = {}
 for _, r in df_thresh.iterrows():
     key = norm_name(r.get(comp_col, ""))
@@ -278,10 +350,10 @@ for _, r in df_thresh.iterrows():
         continue
     thresh_dict[key] = {
         "vsl": r.get(vsl_col) if vsl_col else None,
-        "compare": r.get(compare_col)
+        "compare": r.get(compare_col) if compare_col else None,
     }
 
-st.success(f"✅ נטענו {len(thresh_dict)} ערכי סף (Compound={comp_col}, Compare={compare_label})")
+st.success(f"✅ נטענו ערכי סף: Compound={comp_col}, Orange={compare_label}")
 
 # Parse ALS files
 all_data = []
@@ -304,7 +376,6 @@ with st.expander(f"👁️ תצוגה מקדימה ({len(df_all)} שורות)"):
 
 # Output workbook
 wb_out = Workbook()
-# remove default sheet if exists
 if wb_out.active:
     wb_out.remove(wb_out.active)
 
@@ -366,10 +437,9 @@ for group in groups:
 
         for ci, val in enumerate(values, 1):
             c = ws.cell(row=ri, column=ci, value=val)
-            # highlight result + status cells
             style_data(c, highlight if ci in [5, 8] else None)
 
-    for ci, w in enumerate([14,10,28,10,12,12,22,22], 1):
+    for ci, w in enumerate([14,10,28,10,12,12,28,24], 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
     ws.freeze_panes = "A3"
 
@@ -377,7 +447,7 @@ st.markdown("---")
 c1, c2, c3 = st.columns(3)
 c1.metric("סה״כ תוצאות", stats["total"])
 c2.metric("🟡 חריגות VSL", stats["vsl"])
-c3.metric(f"🟠 חריגות מעל {compare_label}", stats["compare"])
+c3.metric(f"🟠 חריגות מעל הערך שנבחר", stats["compare"])
 
 buf = io.BytesIO()
 wb_out.save(buf)
