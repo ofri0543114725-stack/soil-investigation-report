@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 from openpyxl import Workbook, load_workbook
@@ -68,8 +67,24 @@ def safe_sheet_title(name, existing):
         i += 1
     return title[:31]
 
+def friendly_col_label(col: str) -> str:
+    """Pretty label for sidebar, but keeps original col key available."""
+    c = col.lower().strip()
+    c = c.replace("_", " ")
+    c = re.sub(r"\s+", " ", c)
+    # title-casing lightly while keeping tier / vsl readable
+    if c.startswith("tier"):
+        return c.upper().replace(" 1", " 1")
+    if c == "vsl" or " vsl" in c:
+        return c.upper()
+    if c.startswith("cas"):
+        return "CAS"
+    if c.startswith("chemical"):
+        return "Chemical"
+    return c
+
 # --------------------------------------------------
-# ALS PARSER
+# ALS PARSER (minimal - keep your original if needed)
 # --------------------------------------------------
 def parse_als_file(file_bytes, filename):
     try:
@@ -77,181 +92,301 @@ def parse_als_file(file_bytes, filename):
     except Exception as e:
         return None, f"שגיאה בפתיחת הקובץ: {e}"
 
-    ws = wb[wb.sheetnames[0]]
-    rows = list(ws.iter_rows(values_only=True))
-
-    header_row = None
-    for i, r in enumerate(rows):
-        if r and "Client Sample ID" in str(r):
-            header_row = i
+    # try to find client soil sheet, else first
+    main_sheet = None
+    for name in wb.sheetnames:
+        if "Client" in name and "SOIL" in name:
+            main_sheet = wb[name]
             break
-    if header_row is None:
+    if main_sheet is None:
+        main_sheet = wb[wb.sheetnames[0]]
+
+    rows = list(main_sheet.iter_rows(values_only=True))
+
+    sample_row_idx = None
+    for i, row in enumerate(rows):
+        if any("Client Sample ID" in str(v) for v in row if v):
+            sample_row_idx = i
+            break
+    if sample_row_idx is None:
         return None, "לא נמצאה שורת Sample IDs"
 
-    sample_row = rows[header_row]
-    col_map = {}
-    for i, val in enumerate(sample_row):
+    sample_row = rows[sample_row_idx]
+    col_to_sample = {}
+    for col_idx, val in enumerate(sample_row):
         if val and val != "Client Sample ID":
-            col_map[i] = str(val).strip()
+            col_to_sample[col_idx] = str(val).strip()
 
-    param_row = None
-    for i, r in enumerate(rows):
-        if r and len(r) > 0 and r[0] == "Parameter":
-            param_row = i
+    header_row_idx = None
+    for i, row in enumerate(rows):
+        if row and len(row) > 0 and row[0] == "Parameter":
+            header_row_idx = i
             break
-    if param_row is None:
+    if header_row_idx is None:
         return None, "לא נמצאה שורת Parameter"
 
-    data = []
-    group = "Unknown"
+    records = []
+    current_group = "Unknown"
 
-    for r in rows[param_row+1:]:
-        if not r or not r[0]:
+    for row in rows[header_row_idx + 1:]:
+        param  = row[0] if len(row) > 0 else None
+        method = row[1] if len(row) > 1 else None
+        unit   = row[2] if len(row) > 2 else None
+
+        if not param:
             continue
 
-        if r[0] and not r[1] and not r[2]:
-            group = str(r[0]).strip()
+        # group row
+        if param and not method and not unit:
+            current_group = str(param).strip()
             continue
 
-        for col_idx, sample in col_map.items():
-            val = r[col_idx] if col_idx < len(r) else None
+        for col_idx, sample_name in col_to_sample.items():
+            val = row[col_idx] if col_idx < len(row) else None
+
+            # depth from sample name if exists like S12 (1.5)
+            match = re.match(r"^(S-?\d+[A-Za-z]*)\s*\(([0-9.]+)\)", sample_name)
+            if match:
+                sid   = match.group(1)
+                depth = float(match.group(2))
+            else:
+                sid   = sample_name
+                depth = None
+
             result_str = str(val).strip() if val is not None else ""
-
             if result_str.startswith("<"):
                 result = 0.0
-            else:
+            elif result_str and result_str != "None":
                 try:
                     result = float(result_str)
                 except:
                     result = None
+            else:
+                result = None
 
             if result is not None:
-                data.append({
-                    "sample_id": sample,
-                    "compound": r[0],
-                    "unit": r[2] if len(r) > 2 else "mg/kg",
-                    "result": result,
+                records.append({
+                    "sample_id":  sid,
+                    "depth":      depth,
+                    "compound":   str(param).strip(),
+                    "unit":       str(unit).strip() if unit else "mg/kg",
+                    "result":     result,
                     "result_str": result_str,
-                    "group": group
+                    "group":      current_group,
+                    "source":     filename
                 })
 
-    if not data:
+    if not records:
         return None, "לא נמצאו נתונים"
 
-    return pd.DataFrame(data), None
+    return pd.DataFrame(records), None
 
 # --------------------------------------------------
-# SIDEBAR
-# --------------------------------------------------
-st.sidebar.header("⚙️ הגדרות")
-selected_tier = st.sidebar.selectbox("בחר TIER 1:", ["industrial","residential"])
-
-# --------------------------------------------------
-# FILE UPLOAD
+# UPLOADS
 # --------------------------------------------------
 col1, col2 = st.columns(2)
-
 with col1:
-    threshold_file = st.file_uploader("קובץ ערכי סף", type=["xlsx"])
-
+    st.subheader("📁 קובץ ערכי סף")
+    threshold_file = st.file_uploader("העלה קובץ ערכי סף (Excel)", type=["xlsx","xls"], key="thresholds")
 with col2:
-    data_files = st.file_uploader("קבצי ALS", type=["xlsx"], accept_multiple_files=True)
+    st.subheader("📂 קבצי נתונים מ-ALS")
+    data_files = st.file_uploader("העלה קבצי ALS — אפשר כמה ביחד", type=["xlsx","xls"], accept_multiple_files=True, key="data")
+
+# --------------------------------------------------
+# SIDEBAR (dynamic - depends on threshold file)
+# --------------------------------------------------
+st.sidebar.header("⚙️ הגדרות")
+
+if threshold_file is None:
+    st.sidebar.info("כדי לראות את כל האופציות (VSL / TIER 1 ...), קודם תעלה קובץ ערכי סף.")
+    st.stop()
+
+# read thresholds early for sidebar options
+try:
+    df_thresh = pd.read_excel(threshold_file)
+except Exception as e:
+    st.sidebar.error(f"שגיאה בקריאת קובץ ערכי סף: {e}")
+    st.stop()
+
+df_thresh.columns = [str(c).lower().strip() for c in df_thresh.columns]
+
+# detect compound column
+comp_aliases = {
+    "chemical","chemical name","compound","parameter","analyte","analyte name","name",
+    "תרכובת","חומר","מזהם"
+}
+comp_col = next((c for c in df_thresh.columns if c in comp_aliases), None)
+if not comp_col:
+    st.sidebar.error("לא הצלחתי לזהות עמודת שם תרכובת (Chemical/Compound/Parameter).")
+    st.sidebar.write("עמודות שנמצאו:", list(df_thresh.columns))
+    st.stop()
+
+# Build list of "threshold columns" user can select from: VSL + all Tier1 columns (and optionally more)
+threshold_cols = []
+for c in df_thresh.columns:
+    if c == comp_col:
+        continue
+    if "tier" in c and "1" in c:
+        threshold_cols.append(c)
+    elif "vsl" in c:
+        threshold_cols.append(c)
+
+if not threshold_cols:
+    st.sidebar.error("לא נמצאו עמודות VSL או TIER 1 בקובץ ערכי הסף.")
+    st.sidebar.write("עמודות שנמצאו:", list(df_thresh.columns))
+    st.stop()
+
+# Map pretty labels -> real col
+pretty_map = {friendly_col_label(c): c for c in threshold_cols}
+pretty_options = list(pretty_map.keys())
+
+default_choice = None
+for lbl, col in pretty_map.items():
+    if col == "vsl" or col.endswith(" vsl") or "vsl" in col:
+        default_choice = lbl
+        break
+if default_choice is None:
+    default_choice = pretty_options[0]
+
+compare_label = st.sidebar.selectbox(
+    "בחר ערך סף להשוואה (יצבע כתום מעליו)",
+    options=pretty_options,
+    index=pretty_options.index(default_choice) if default_choice in pretty_options else 0
+)
+compare_col = pretty_map[compare_label]
+
+# VSL column (for yellow) - allow turning on/off
+vsl_candidates = [c for c in df_thresh.columns if "vsl" in c]
+vsl_col = vsl_candidates[0] if vsl_candidates else None
+use_vsl = st.sidebar.checkbox("להציג/לחשב חריגות VSL (צהוב)", value=(vsl_col is not None))
+st.sidebar.markdown("---")
+st.sidebar.markdown("🟡 חריגה מעל VSL")
+st.sidebar.markdown("🟠 חריגה מעל ערך סף שנבחר למעלה")
 
 # --------------------------------------------------
 # MAIN LOGIC
 # --------------------------------------------------
-if threshold_file and data_files:
+if not data_files:
+    st.info("👆 העלה גם קבצי ALS כדי להתחיל לעבד.")
+    st.stop()
 
-    df_thresh = pd.read_excel(threshold_file)
-    df_thresh.columns = [str(c).lower().strip() for c in df_thresh.columns]
+# Build threshold dict: compound -> values for vsl + chosen compare_col
+thresh_dict = {}
+for _, r in df_thresh.iterrows():
+    key = norm_name(r.get(comp_col, ""))
+    if not key or key == "nan":
+        continue
+    thresh_dict[key] = {
+        "vsl": r.get(vsl_col) if vsl_col else None,
+        "compare": r.get(compare_col)
+    }
 
-    comp_col = next((c for c in df_thresh.columns if c in ["chemical","compound","parameter"]), None)
-    vsl_col = next((c for c in df_thresh.columns if "vsl" in c), None)
-    tier_col = next((c for c in df_thresh.columns if selected_tier in c and "tier 1" in c), None)
+st.success(f"✅ נטענו {len(thresh_dict)} ערכי סף (Compound={comp_col}, Compare={compare_label})")
 
-    if not comp_col or not vsl_col:
-        st.error("עמודות chemical / vsl לא נמצאו בקובץ הסף")
-        st.stop()
+# Parse ALS files
+all_data = []
+for f in data_files:
+    df, err = parse_als_file(f.read(), f.name)
+    if err:
+        st.warning(f"⚠️ {f.name}: {err}")
+    else:
+        all_data.append(df)
+        st.success(f"✅ {f.name} — {len(df)} תוצאות")
 
-    thresh_dict = {}
-    for _, r in df_thresh.iterrows():
-        key = norm_name(r[comp_col])
-        thresh_dict[key] = {
-            "vsl": r[vsl_col],
-            "tier1": r[tier_col] if tier_col else None
-        }
+if not all_data:
+    st.error("לא נטענו נתונים.")
+    st.stop()
 
-    all_data = []
-    for f in data_files:
-        df, err = parse_als_file(f.read(), f.name)
-        if err:
-            st.warning(err)
-        else:
-            all_data.append(df)
+df_all = pd.concat(all_data, ignore_index=True)
 
-    if not all_data:
-        st.stop()
+with st.expander(f"👁️ תצוגה מקדימה ({len(df_all)} שורות)"):
+    st.dataframe(df_all.head(30))
 
-    df_all = pd.concat(all_data)
+# Output workbook
+wb_out = Workbook()
+# remove default sheet if exists
+if wb_out.active:
+    wb_out.remove(wb_out.active)
 
-    wb_out = Workbook()
-    if wb_out.active:
-        wb_out.remove(wb_out.active)
+existing_titles = set()
+stats = {"total": 0, "vsl": 0, "compare": 0}
 
-    existing_titles = set()
+groups = sorted(df_all["group"].unique())
+for group in groups:
+    title = safe_sheet_title(group, existing_titles)
+    existing_titles.add(title)
+    ws = wb_out.create_sheet(title=title)
 
-    for group in df_all["group"].unique():
-        df_g = df_all[df_all["group"] == group]
+    headers = ["שם קידוח", "עומק (מ')", "תרכובת", "יחידות", "תוצאה", "VSL", compare_label, "סטטוס"]
+    ws.merge_cells(f"A1:{get_column_letter(len(headers))}1")
+    c = ws["A1"]
+    c.value = f"תוצאות — {group}"
+    style_header(c, 1)
+    ws.row_dimensions[1].height = 22
 
-        title = safe_sheet_title(group, existing_titles)
-        existing_titles.add(title)
+    for ci, h in enumerate(headers, 1):
+        c = ws.cell(row=2, column=ci, value=h)
+        style_header(c, 2)
+    ws.row_dimensions[2].height = 30
 
-        ws = wb_out.create_sheet(title=title)
+    df_g = df_all[df_all["group"] == group].copy()
 
-        headers = ["קידוח","תרכובת","תוצאה","VSL","TIER 1","סטטוס"]
+    for ri, (_, row) in enumerate(df_g.iterrows(), start=3):
+        compound_key = norm_name(row["compound"])
+        result_val   = row["result"]
 
-        for i,h in enumerate(headers,1):
-            c = ws.cell(row=1,column=i,value=h)
-            style_header(c,2)
+        thr = thresh_dict.get(compound_key, {})
+        vsl = thr.get("vsl")
+        cmpv = thr.get("compare")
 
-        row_i = 2
-        for _,r in df_g.iterrows():
-            key = norm_name(r["compound"])
-            thresh = thresh_dict.get(key,{})
-            vsl = thresh.get("vsl")
-            tier = thresh.get("tier1")
+        highlight = None
+        status = "תקין"
+        try:
+            r = float(result_val)
+            if cmpv is not None and pd.notna(cmpv) and float(cmpv) > 0 and r > float(cmpv):
+                highlight = "tier1"  # orange
+                status = f"⚠️ חריגה מעל {compare_label}"
+                stats["compare"] += 1
+            elif use_vsl and vsl is not None and pd.notna(vsl) and float(vsl) > 0 and r > float(vsl):
+                highlight = "vsl"     # yellow
+                status = "⚡ חריגת VSL"
+                stats["vsl"] += 1
+        except:
+            pass
 
-            status = "תקין"
-            highlight = None
+        stats["total"] += 1
 
-            try:
-                if tier and r["result"] > float(tier):
-                    status="חריגת TIER 1"
-                    highlight="tier1"
-                elif vsl and r["result"] > float(vsl):
-                    status="חריגת VSL"
-                    highlight="vsl"
-            except:
-                pass
+        values = [
+            row["sample_id"], row["depth"], row["compound"], row["unit"],
+            row.get("result_str", result_val),
+            vsl if (use_vsl and vsl is not None and pd.notna(vsl)) else "—",
+            cmpv if (cmpv is not None and pd.notna(cmpv)) else "—",
+            status
+        ]
 
-            values=[r["sample_id"],r["compound"],r["result"],vsl,tier,status]
+        for ci, val in enumerate(values, 1):
+            c = ws.cell(row=ri, column=ci, value=val)
+            # highlight result + status cells
+            style_data(c, highlight if ci in [5, 8] else None)
 
-            for col_i,val in enumerate(values,1):
-                c=ws.cell(row=row_i,column=col_i,value=val)
-                style_data(c,highlight if col_i==3 else None)
+    for ci, w in enumerate([14,10,28,10,12,12,22,22], 1):
+        ws.column_dimensions[get_column_letter(ci)].width = w
+    ws.freeze_panes = "A3"
 
-            row_i+=1
+st.markdown("---")
+c1, c2, c3 = st.columns(3)
+c1.metric("סה״כ תוצאות", stats["total"])
+c2.metric("🟡 חריגות VSL", stats["vsl"])
+c3.metric(f"🟠 חריגות מעל {compare_label}", stats["compare"])
 
-    buf=io.BytesIO()
-    wb_out.save(buf)
-    buf.seek(0)
+buf = io.BytesIO()
+wb_out.save(buf)
+buf.seek(0)
 
-    st.download_button(
-        "⬇️ הורד קובץ Excel",
-        data=buf,
-        file_name="soil_report.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-else:
-    st.info("העלה קובץ ערכי סף וקבצי ALS")
+st.download_button(
+    label="⬇️ הורד קובץ Excel מעובד",
+    data=buf,
+    file_name="soil_report.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    use_container_width=True
+)
