@@ -41,6 +41,4 @@ def parse_als_file(file_bytes):
         for col_idx, sname in samples.items():
             val = row[col_idx]
             match = re.match(r"^(S-?\d+[A-Za-z]*)\s*\(([0-9.]+)\)", sname)
-            sid, depth = (match.group(1), float(match.group(2))) if match else (sname, 0.0)
-            res_str = str(val).strip() if val is not None else ""
-            res_num = 0.0 if res_str.startswith("<") else (float(res_str) if res_str.replace('.','',1).isdigit() else None
+            sid,
