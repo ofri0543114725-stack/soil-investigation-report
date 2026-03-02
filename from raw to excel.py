@@ -42,4 +42,32 @@ def parse_als_data(file_bytes):
                 samples = {idx: str(v).strip() for idx, v in enumerate(rows[s_idx]) if v and v != "Client Sample ID"}
                 for row in rows[p_idx + 1:]:
                     param, unit = row[0], row[2]
-                    if
+                    if not param or not unit: continue
+                    for col_idx, sname in samples.items():
+                        val = row[col_idx]
+                        match = re.match(r"^(S-?\d+[A-Za-z]*)\s*\(([0-9.]+)\)", sname)
+                        sid, depth = (match.group(1), float(match.group(2))) if match else (sname, 0.0)
+                        res_str = str(val).strip() if val is not None else ""
+                        res_num = 0.0 if res_str.startswith("<") else (float(res_str) if str(res_str).replace('.','',1).isdigit() else None)
+                        all_records.append({
+                            "sample_id": sid, "depth": depth, "compound": str(param).strip(),
+                            "unit": unit, "result": res_num, "result_str": res_str
+                        })
+    except: pass
+    return pd.DataFrame(all_records)
+
+# --- ממשק האפליקציה ---
+st.title("🧪 הפקת דוח מאוחד - 4 לשוניות")
+
+with st.sidebar:
+    st.header("📂 טעינת ערכי סף")
+    f_main = st.file_uploader("1. ערכי סף כלליים (גרסה 7)", type=["csv", "xlsx"])
+    f_pfas = st.file_uploader("2. ערכי סף PFAS", type=["csv", "xlsx"])
+    tier1_col = st.text_input("שם עמודת Tier 1 לצביעה", "Tier 1 industrial A 0-6m")
+    st.markdown("---")
+    als_files = st.file_uploader("3. העלה קבצי ALS", type=["xlsx"], accept_multiple_files=True)
+
+if (f_main or f_pfas) and als_files:
+    # בניית מילון ערכי סף משני הקבצים
+    thresh_map = {}
+    for f in [f
