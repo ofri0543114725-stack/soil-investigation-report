@@ -202,6 +202,11 @@ def write_metals_sheet(ws, df, thresh_metals):
     Wide: שם קידוח | עומק | (blank) | Al | As | ...
     thresh_metals: dict symbol -> {vsl, tier1, cas}
     """
+    # ensure compound_lower exists
+    df = df.copy()
+    if "compound_lower" not in df.columns:
+        df["compound_lower"] = df["compound"].apply(norm)
+
     # build list of metals that actually appear in data
     present = set()
     for _, r in df.iterrows():
@@ -209,7 +214,11 @@ def write_metals_sheet(ws, df, thresh_metals):
         if sym: present.add(sym)
 
     metals = [m for m in METALS_ORDER if m in present]
-    if not metals: metals = list(present)
+    extra  = sorted(present - set(METALS_ORDER))
+    metals = metals + extra
+    if not metals:
+        ws.cell(1,1,"אין נתוני מתכות")
+        return
 
     hdr = ["שם קידוח","עומק",None] + metals
     for ci, h in enumerate(hdr, 1):
@@ -259,6 +268,9 @@ def write_pfas_sheet(ws, df, thresh_pfas):
     """
     Vertical: תרכובת | CAS | ערך סף | יחידות | LOR | שם קידוח → sample cols
     """
+    df = df.copy()
+    if "compound_lower" not in df.columns:
+        df["compound_lower"] = df["compound"].apply(norm)
     samples = sorted(df["sample_id"].unique(), key=sort_key)
     sample_depth = {r["sample_id"]: r["depth"] for _,r in df.iterrows()}
 
@@ -301,6 +313,9 @@ def write_voc_sheet(ws, df, thresh_voc):
     """
     Vertical: קבוצה | קבוצה | תרכובת | CAS | VSL | TIER 1 | יחידות | → sample cols
     """
+    df = df.copy()
+    if "compound_lower" not in df.columns:
+        df["compound_lower"] = df["compound"].apply(norm)
     samples = sorted(df["sample_id"].unique(), key=sort_key)
     sample_depth = {}
     for _,r in df.iterrows():
