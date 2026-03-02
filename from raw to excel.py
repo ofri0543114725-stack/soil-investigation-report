@@ -199,32 +199,32 @@ def write_tph_sheet(ws, df):
 
 def write_metals_sheet(ws, df, thresh_metals):
     """
-    Wide: שם קידוח | עומק | (blank) | Al | As | ...
-    thresh_metals: dict symbol -> {vsl, tier1, cas}
+    Wide: שם קידוח | עומק | (blank) | Al | Sb | As | ...
+    Uses pandas pivot_table to guarantee correct wide format.
     """
-    # ensure compound_lower exists
     df = df.copy()
     if "compound_lower" not in df.columns:
         df["compound_lower"] = df["compound"].apply(norm)
 
-    # build list of metals that actually appear in data
-    present = set()
-    for _, r in df.iterrows():
-        sym = METAL_MAP.get(r["compound_lower"])
-        if sym: present.add(sym)
+    # map to symbols
+    df["sym"] = df["compound_lower"].map(METAL_MAP)
+    df = df[df["sym"].notna()]
 
-    metals = [m for m in METALS_ORDER if m in present]
-    extra  = sorted(present - set(METALS_ORDER))
-    metals = metals + extra
-    if not metals:
+    if df.empty:
         ws.cell(1,1,"אין נתוני מתכות")
         return
 
+    # build ordered metal list
+    present = set(df["sym"].unique())
+    metals  = [m for m in METALS_ORDER if m in present]
+    metals += sorted(present - set(METALS_ORDER))
+
+    # header row 1
     hdr = ["שם קידוח","עומק",None] + metals
     for ci, h in enumerate(hdr, 1):
         style_hdr(ws.cell(1, ci, h), HDR_BLUE_FILL)
 
-    # sub-rows
+    # sub-rows 2-5
     for ri, lbl in enumerate(["יחידות","CAS","VSL","TIER 1"], 2):
         style_hdr(ws.cell(ri, 2, lbl), HDR_BLUE_FILL)
         for ci, sym in enumerate(metals, 4):
@@ -233,27 +233,35 @@ def write_metals_sheet(ws, df, thresh_metals):
                    "VSL":t.get("vsl","-"),"TIER 1":t.get("tier1","-")}[lbl]
             style_hdr(ws.cell(ri, ci, val), HDR_BLUE_FILL)
 
-    # pivot
-    pivoted = {}
-    for _, r in df.iterrows():
-        sym = METAL_MAP.get(r["compound_lower"])
-        if not sym: continue
-        k = (r["sample_id"], r["depth"])
-        if k not in pivoted: pivoted[k] = {}
-        pivoted[k][sym] = r["result_str"]
+    # pivot using pandas - guaranteed wide format
+    pt = df.pivot_table(
+        index=["sample_id","depth"],
+        columns="sym",
+        values="result_str",
+        aggfunc="first"
+    )
+
+    # sort rows by sample number then depth
+    pt = pt.reindex(
+        sorted(pt.index, key=lambda x: (sort_key(x[0]), x[1] or 0))
+    )
 
     ri = 6
     prev_sid = None
-    for (sid, depth), mvals in sorted(pivoted.items(), key=lambda x:(sort_key(x[0][0]), x[0][1] or 0)):
+    for (sid, depth), row_data in pt.iterrows():
         sid_val = sid if sid != prev_sid else None
         prev_sid = sid
+
         for ci, val in enumerate([sid_val, depth, None], 1):
             style_data(ws.cell(ri, ci, val))
+
         for ci, sym in enumerate(metals, 4):
-            val = mvals.get(sym, "")
-            t = thresh_metals.get(sym, {})
+            val = row_data.get(sym, "") or ""
+            val = "" if str(val) == "nan" else str(val)
+            t  = thresh_metals.get(sym, {})
             hl = check_exceed(val, t.get("vsl"), t.get("tier1"))
             style_data(ws.cell(ri, ci, val), hl)
+
         ri += 1
 
     ws.column_dimensions["A"].width = 14
