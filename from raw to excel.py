@@ -7,6 +7,7 @@ import io, re
 
 st.set_page_config(page_title="דוח סקר קרקע", layout="wide", page_icon="🧪")
 st.title("🧪 מערכת עיבוד תוצאות מעבדה")
+st.caption("v2.5 - fix: is_oro/is_dro exact match only")
 st.markdown("---")
 
 # ── STYLES ────────────────────────────────────────────────────────────────────
@@ -260,25 +261,21 @@ def parse_als_file(file_bytes, filename):
 # ── TPH SHEET ─────────────────────────────────────────────────────────────────
 def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
     def is_dro(c):
-        # explicit DRO in name, OR c10-c28 (without c40, without oro)
-        if "dro" in c: return True
-        if "oro" in c: return False
+        if "(dro)" in c or "- dro" in c or c.strip()=="dro": return True
+        if "(oro)" in c or "- oro" in c: return False
         if "c10" in c and "c28" in c and "c40" not in c: return True
         return False
     def is_oro(c):
-        # explicit ORO in name, OR c24-c40 or c28-c40 (without dro)
-        if "oro" in c: return True
-        if "dro" in c: return False
+        if "(oro)" in c or "- oro" in c or c.strip()=="oro": return True
+        if "(dro)" in c or "- dro" in c: return False
         if "c24" in c and "c40" in c: return True
         if "c28" in c and "c40" in c: return True
         return False
     def is_total(c):
-        # c10-c40 total (no dro/oro) — use as Total TPH directly
-        if "dro" in c or "oro" in c: return False
+        if "(dro)" in c or "(oro)" in c or "- dro" in c or "- oro" in c: return False
         if "c10" in c and "c40" in c: return True
         if "total" in c and ("tph" in c or "hydrocarbon" in c): return True
         return False
-
     vsl_d,t1_d,_ = get_thresh("C10 - C28 Fraction (DRO)", thresh_dict, t1col)
     vsl_o,t1_o,_ = get_thresh("C24 - C40 Fraction (ORO)", thresh_dict, t1col)
     # use TPH total entry if available
@@ -520,6 +517,44 @@ pfas_df   = dg(["perfluor","pfas","fluorin"])
 voc_df    = dg(["voc","svoc","btex","aromatic","halogenated","volatile",
                  "alcohol","aldehyde","ketone","phenol","pah","aniline",
                  "nitro","phthalate","pesticide","pcb","other"])
+
+
+# ── DEBUG TPH ─────────────────────────────────────────────────────────────────
+if not tph_df.empty:
+    def _dbg_tph(df):
+        def _dro(c):
+            if "(dro)" in c or "- dro" in c or c.strip()=="dro": return True
+            if "(oro)" in c or "- oro" in c: return False
+            return "c10" in c and "c28" in c and "c40" not in c
+        def _oro(c):
+            if "(oro)" in c or "- oro" in c or c.strip()=="oro": return True
+            if "(dro)" in c or "- dro" in c: return False
+            return ("c24" in c and "c40" in c) or ("c28" in c and "c40" in c)
+        def _tot(c):
+            if "(dro)" in c or "(oro)" in c or "- dro" in c or "- oro" in c: return False
+            return ("c10" in c and "c40" in c) or ("total" in c and "tph" in c)
+        pv = {}
+        for _,r in df.iterrows():
+            k=(r["sample_id"],r["depth"])
+            if k not in pv: pv[k]={"DRO":"","ORO":"","TOT":"","DRO_f":None,"ORO_f":None,"DRO_lor":None,"ORO_lor":None}
+            c=r["compound_lower"]
+            if _dro(c) and not pv[k]["DRO"]: pv[k]["DRO"]=r["result_str"]; pv[k]["DRO_f"]=r["result"]; pv[k]["DRO_lor"]=r.get("lor_val")
+            elif _oro(c) and not pv[k]["ORO"]: pv[k]["ORO"]=r["result_str"]; pv[k]["ORO_f"]=r["result"]; pv[k]["ORO_lor"]=r.get("lor_val")
+            elif _tot(c) and not pv[k]["TOT"]: pv[k]["TOT"]=r["result_str"]
+        out=[]
+        for (sid,depth),v in sorted(pv.items()):
+            if v["TOT"]: ts=v["TOT"]
+            else:
+                dl=v["DRO"] and str(v["DRO"]).startswith("<"); ol=v["ORO"] and str(v["ORO"]).startswith("<")
+                de=not v["DRO"]; oe=not v["ORO"]
+                dn=v["DRO_lor"] if dl and v["DRO_lor"] is not None else (v["DRO_f"] or 0)
+                on=v["ORO_lor"] if ol and v["ORO_lor"] is not None else (v["ORO_f"] or 0)
+                tf=dn+on
+                ts=f"<{tf:.0f}" if (dl or de) and (ol or oe) and not (de and oe) else f"{tf:.0f}"
+            out.append({"Sample":sid,"Depth":depth,"DRO":v["DRO"],"ORO":v["ORO"],"Total":ts,"DRO_lor":v["DRO_lor"],"ORO_lor":v["ORO_lor"],"compound_names":str([r["compound_lower"] for _,r in df[df["sample_id"]==sid].iterrows()])[:80]})
+        return pd.DataFrame(out)
+    with st.expander("🔍 DEBUG TPH - לחץ לראות חישובים"):
+        st.dataframe(_dbg_tph(tph_df), use_container_width=True)
 
 # ── BUILD ──────────────────────────────────────────────────────────────────────
 wb_out=Workbook(); wb_out.remove(wb_out.active)
