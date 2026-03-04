@@ -146,116 +146,102 @@ THRESH_METAL_MAP = {
 # ── VOC/SVOC COMPOUND MAP - exact order from reference file ──────────────────
 # List of (voc_svoc, group, compound_name) in exact display order
 VOC_COMPOUND_ORDER = [
-    # VOCs - Non-Halogenated VOCs (10)
-    ("VOCs", "Non-Halogenated VOCs", "1.2.4-Trimethylbenzene"),
-    ("VOCs", "Non-Halogenated VOCs", "1.3.5-Trimethylbenzene"),
-    ("VOCs", "Non-Halogenated VOCs", "MTBE"),
-    ("VOCs", "Non-Halogenated VOCs", "Styrene"),
-    ("VOCs", "Non-Halogenated VOCs", "n-Butylbenzene"),
-    ("VOCs", "Non-Halogenated VOCs", "n-Propylbenzene"),
-    ("VOCs", "Non-Halogenated VOCs", "Isopropylbenzene"),
-    ("VOCs", "Non-Halogenated VOCs", "Acetone"),
-    ("VOCs", "Non-Halogenated VOCs", "2-Butanone (MEK)"),
-    ("VOCs", "Non-Halogenated VOCs", "1.4-Dioxane"),
-    # VOCs - BTEX (4)
-    ("VOCs", "BTEX", "Benzene"),
-    ("VOCs", "BTEX", "Toluene"),
-    ("VOCs", "BTEX", "Ethylbenzene"),
-    ("VOCs", "BTEX", "Sum of Xylenes"),
-    # VOCs - Halogenated VOCs (16)
-    ("VOCs", "Halogenated VOCs", "1.1-Dichloroethane"),
-    ("VOCs", "Halogenated VOCs", "1.1-Dichloroethene"),
-    ("VOCs", "Halogenated VOCs", "1.2-Dichloroethane"),
-    ("VOCs", "Halogenated VOCs", "1.2-Dichloropropane"),
-    ("VOCs", "Halogenated VOCs", "Chlorobenzene"),
-    ("VOCs", "Halogenated VOCs", "Chloroform"),
-    ("VOCs", "Halogenated VOCs", "Dichloromethane"),
-    ("VOCs", "Halogenated VOCs", "Tetrachloroethene"),
-    ("VOCs", "Halogenated VOCs", "Tetrachloromethane"),
-    ("VOCs", "Halogenated VOCs", "Trichloroethene"),
-    ("VOCs", "Halogenated VOCs", "Vinyl chloride"),
-    ("VOCs", "Halogenated VOCs", "cis-1.2-Dichloroethene"),
-    ("VOCs", "Halogenated VOCs", "trans-1.2-Dichloroethene"),
-    ("VOCs", "Halogenated VOCs", "1.4-Dichlorobenzene"),
-    ("VOCs", "Halogenated VOCs", "1.2-Dichlorobenzene"),
-    ("VOCs", "Halogenated VOCs", "1.3-Dichlorobenzene"),
-    # SVOCs - Phenols & Naphtols (5)
-    ("SVOCs", "Phenols & Naphtols", "2.4-Dimethylphenol"),
-    ("SVOCs", "Phenols & Naphtols", "2-Methylphenol"),
-    ("SVOCs", "Phenols & Naphtols", "3 & 4-Methylphenol"),
-    ("SVOCs", "Phenols & Naphtols", "4-Chloro-3-methylphenol"),
-    ("SVOCs", "Phenols & Naphtols", "Phenol"),
-    # SVOCs - PAHs (16)
-    ("SVOCs", "PAHs", "Acenaphthene"),
-    ("SVOCs", "PAHs", "Acenaphthylene"),
-    ("SVOCs", "PAHs", "Anthracene"),
-    ("SVOCs", "PAHs", "Benz(a)anthracene"),
-    ("SVOCs", "PAHs", "Benzo(a)pyrene"),
-    ("SVOCs", "PAHs", "Benzo(b)fluoranthene"),
-    ("SVOCs", "PAHs", "Benzo(g.h.i)perylene"),
-    ("SVOCs", "PAHs", "Benzo(k)fluoranthene"),
-    ("SVOCs", "PAHs", "Chrysene"),
-    ("SVOCs", "PAHs", "Dibenz(a.h)anthracene"),
-    ("SVOCs", "PAHs", "Fluoranthene"),
-    ("SVOCs", "PAHs", "Fluorene"),
-    ("SVOCs", "PAHs", "Indeno(1.2.3.cd)pyrene"),
-    ("SVOCs", "PAHs", "Naphthalene"),
-    ("SVOCs", "PAHs", "Phenanthrene"),
-    ("SVOCs", "PAHs", "Pyrene"),
-    # SVOCs - Anilines (4)
-    ("SVOCs", "Anilines", "4-Chloroaniline"),
-    ("SVOCs", "Anilines", "Aniline"),
-    ("SVOCs", "Anilines", "Benzidine"),
-    ("SVOCs", "Anilines", "Diphenylamine"),
-    # SVOCs - Aromatic Compounds (8)
-    ("SVOCs", "Aromatic Compounds", "1,1'-Biphenyl"),
-    ("SVOCs", "Aromatic Compounds", "1-Chloronaphthalene"),
-    ("SVOCs", "Aromatic Compounds", "2-Chloronaphthalene"),
-    ("SVOCs", "Aromatic Compounds", "2-Methylnaphthalene"),
-    ("SVOCs", "Aromatic Compounds", "4-Bromophenyl phenyl ether"),
-    ("SVOCs", "Aromatic Compounds", "4-Chlorophenyl phenyl ether"),
-    ("SVOCs", "Aromatic Compounds", "Carbazole"),
-    ("SVOCs", "Aromatic Compounds", "Dibenzofuran"),
-    # SVOCs - Alcohols (1)
-    ("SVOCs", "Alcohols", "Benzyl Alcohol"),
-    # SVOCs - Aldehydes / Ketones (3)
-    ("SVOCs", "Aldehydes / Ketones", "6-Caprolactam"),
-    ("SVOCs", "Aldehydes / Ketones", "Acetophenone"),
-    ("SVOCs", "Aldehydes / Ketones", "Isophorone"),
-    # SVOCs - Chlorophenols (6)
-    ("SVOCs", "Chlorophenols", "2-Chlorophenol"),
-    ("SVOCs", "Chlorophenols", "2.4.5-Trichlorophenol"),
-    ("SVOCs", "Chlorophenols", "2.4.6-Trichlorophenol"),
-    ("SVOCs", "Chlorophenols", "2.4-Dichlorophenol"),
-    ("SVOCs", "Chlorophenols", "2.6-Dichlorophenol"),
-    ("SVOCs", "Chlorophenols", "Pentachlorophenol"),
-    # SVOCs - Nitroaromatic Compounds (10)
-    ("SVOCs", "Nitroaromatic Compounds", "2.4-Dinitrophenol"),
-    ("SVOCs", "Nitroaromatic Compounds", "2.4-Dinitrotoluene"),
-    ("SVOCs", "Nitroaromatic Compounds", "2-Nitroaniline"),
-    ("SVOCs", "Nitroaromatic Compounds", "2-Nitrophenol"),
-    ("SVOCs", "Nitroaromatic Compounds", "2.6-Dinitrotoluene"),
-    ("SVOCs", "Nitroaromatic Compounds", "3-Nitroaniline"),
-    ("SVOCs", "Nitroaromatic Compounds", "4.6-Dinitro-2-methylphenol"),
-    ("SVOCs", "Nitroaromatic Compounds", "4-Nitroaniline"),
-    ("SVOCs", "Nitroaromatic Compounds", "4-Nitrophenol"),
-    ("SVOCs", "Nitroaromatic Compounds", "Nitrobenzene"),
-    # SVOCs - Chlorinated Hydrocarbons (3)
-    ("SVOCs", "Chlorinated Hydrocarbons", "Bis(2-chloroethoxy)methane"),
-    ("SVOCs", "Chlorinated Hydrocarbons", "Bis(2-chloroethyl)ether"),
-    ("SVOCs", "Chlorinated Hydrocarbons", "Bis(2-chloroisopropyl)ether"),
-    # SVOCs - Nitrosoamines (1)
-    ("SVOCs", "Nitrosoamines", "N-Nitrosodi-n-propylamine"),
-    # SVOCs - Pesticides (1)
-    ("SVOCs", "Pesticides", "Dinoseb"),
-    # SVOCs - Phthalates (6)
-    ("SVOCs", "Phthalates", "Bis(2-ethylhexyl)phthalate"),
-    ("SVOCs", "Phthalates", "Butyl benzyl phthalate"),
-    ("SVOCs", "Phthalates", "Di-n-butyl phthalate"),
-    ("SVOCs", "Phthalates", "Di-n-octyl phthalate"),
-    ("SVOCs", "Phthalates", "Diethyl phthalate"),
-    ("SVOCs", "Phthalates", "Dimethyl phthalate"),
+    ('VOCs', 'Non-Halogenated VOCs', '1.2.4-Trimethylbenzene'),
+    ('VOCs', 'Non-Halogenated VOCs', '1.3.5-Trimethylbenzene'),
+    ('VOCs', 'Non-Halogenated VOCs', 'MTBE'),
+    ('VOCs', 'Non-Halogenated VOCs', 'Styrene'),
+    ('VOCs', 'Non-Halogenated VOCs', 'n-Butylbenzene'),
+    ('VOCs', 'Non-Halogenated VOCs', 'n-Propylbenzene'),
+    ('VOCs', 'Non-Halogenated VOCs', 'Isopropylbenzene'),
+    ('VOCs', 'Non-Halogenated VOCs', 'Acetone'),
+    ('VOCs', 'Non-Halogenated VOCs', '2-Butanone (MEK)'),
+    ('VOCs', 'Non-Halogenated VOCs', '1.4-Dioxane'),
+    ('VOCs', 'BTEX', 'Benzene'),
+    ('VOCs', 'BTEX', 'Toluene'),
+    ('VOCs', 'BTEX', 'Ethylbenzene'),
+    ('VOCs', 'BTEX', 'Sum of Xylenes'),
+    ('VOCs', 'Halogenated VOCs', '1.1-Dichloroethane'),
+    ('VOCs', 'Halogenated VOCs', '1.1-Dichloroethene'),
+    ('VOCs', 'Halogenated VOCs', '1.2-Dichloroethane'),
+    ('VOCs', 'Halogenated VOCs', '1.2-Dichloropropane'),
+    ('VOCs', 'Halogenated VOCs', 'Chlorobenzene'),
+    ('VOCs', 'Halogenated VOCs', 'Chloroform'),
+    ('VOCs', 'Halogenated VOCs', 'Dichloromethane'),
+    ('VOCs', 'Halogenated VOCs', 'Tetrachloroethene'),
+    ('VOCs', 'Halogenated VOCs', 'Tetrachloromethane'),
+    ('VOCs', 'Halogenated VOCs', 'Trichloroethene'),
+    ('VOCs', 'Halogenated VOCs', 'Vinyl chloride'),
+    ('VOCs', 'Halogenated VOCs', 'cis-1.2-Dichloroethene'),
+    ('VOCs', 'Halogenated VOCs', 'trans-1.2-Dichloroethene'),
+    ('VOCs', 'Halogenated VOCs', '1.4-Dichlorobenzene'),
+    ('VOCs', 'Halogenated VOCs', '1.2-Dichlorobenzene'),
+    ('VOCs', 'Halogenated VOCs', '1.3-Dichlorobenzene'),
+    ('SVOCs', 'Phenols & Naphtols', '2.4-Dimethylphenol'),
+    ('SVOCs', 'Phenols & Naphtols', '2-Methylphenol'),
+    ('SVOCs', 'Phenols & Naphtols', '3 & 4-Methylphenol'),
+    ('SVOCs', 'Phenols & Naphtols', '4-Chloro-3-methylphenol'),
+    ('SVOCs', 'Phenols & Naphtols', 'Phenol'),
+    ('SVOCs', 'PAHs', 'Acenaphthene'),
+    ('SVOCs', 'PAHs', 'Acenaphthylene'),
+    ('SVOCs', 'PAHs', 'Anthracene'),
+    ('SVOCs', 'PAHs', 'Benz(a)anthracene'),
+    ('SVOCs', 'PAHs', 'Benzo(a)pyrene'),
+    ('SVOCs', 'PAHs', 'Benzo(b)fluoranthene'),
+    ('SVOCs', 'PAHs', 'Benzo(g.h.i)perylene'),
+    ('SVOCs', 'PAHs', 'Benzo(k)fluoranthene'),
+    ('SVOCs', 'PAHs', 'Chrysene'),
+    ('SVOCs', 'PAHs', 'Dibenz(a.h)anthracene'),
+    ('SVOCs', 'PAHs', 'Fluoranthene'),
+    ('SVOCs', 'PAHs', 'Fluorene'),
+    ('SVOCs', 'PAHs', 'Indeno(1.2.3.cd)pyrene'),
+    ('SVOCs', 'PAHs', 'Naphthalene'),
+    ('SVOCs', 'PAHs', 'Phenanthrene'),
+    ('SVOCs', 'PAHs', 'Pyrene'),
+    ('SVOCs', 'Anilines', '4-Chloroaniline'),
+    ('SVOCs', 'Anilines', 'Aniline'),
+    ('SVOCs', 'Anilines', 'Benzidine'),
+    ('SVOCs', 'Anilines', 'Diphenylamine'),
+    ('SVOCs', 'Aromatic Compounds', "1,1'-Biphenyl"),
+    ('SVOCs', 'Aromatic Compounds', '1-Chloronaphthalene'),
+    ('SVOCs', 'Aromatic Compounds', '2-Chloronaphthalene'),
+    ('SVOCs', 'Aromatic Compounds', '2-Methylnaphthalene'),
+    ('SVOCs', 'Aromatic Compounds', '4-Bromophenyl phenyl ether'),
+    ('SVOCs', 'Aromatic Compounds', '4-Chlorophenyl phenyl ether'),
+    ('SVOCs', 'Aromatic Compounds', 'Carbazole'),
+    ('SVOCs', 'Aromatic Compounds', 'Dibenzofuran'),
+    ('SVOCs', 'Alcohols', 'Benzyl Alcohol'),
+    ('SVOCs', 'Aldehydes / Ketones', '6-Caprolactam'),
+    ('SVOCs', 'Aldehydes / Ketones', 'Acetophenone'),
+    ('SVOCs', 'Aldehydes / Ketones', 'Isophorone'),
+    ('SVOCs', 'Chlorophenols', '2-Chlorophenol'),
+    ('SVOCs', 'Chlorophenols', '2.4.5-Trichlorophenol'),
+    ('SVOCs', 'Chlorophenols', '2.4.6-Trichlorophenol'),
+    ('SVOCs', 'Chlorophenols', '2.4-Dichlorophenol'),
+    ('SVOCs', 'Chlorophenols', '2.6-Dichlorophenol'),
+    ('SVOCs', 'Chlorophenols', 'Pentachlorophenol'),
+    ('SVOCs', 'Nitroaromatic Compounds', '2.4-Dinitrophenol'),
+    ('SVOCs', 'Nitroaromatic Compounds', '2.4-Dinitrotoluene'),
+    ('SVOCs', 'Nitroaromatic Compounds', '2-Nitroaniline'),
+    ('SVOCs', 'Nitroaromatic Compounds', '2-Nitrophenol'),
+    ('SVOCs', 'Nitroaromatic Compounds', '2.6-Dinitrotoluene'),
+    ('SVOCs', 'Nitroaromatic Compounds', '3-Nitroaniline'),
+    ('SVOCs', 'Nitroaromatic Compounds', '4.6-Dinitro-2-methylphenol'),
+    ('SVOCs', 'Nitroaromatic Compounds', '4-Nitroaniline'),
+    ('SVOCs', 'Nitroaromatic Compounds', '4-Nitrophenol'),
+    ('SVOCs', 'Nitroaromatic Compounds', 'Nitrobenzene'),
+    ('SVOCs', 'Chlorinated Hydrocarbons', 'Bis(2-chloroethoxy)methane'),
+    ('SVOCs', 'Chlorinated Hydrocarbons', 'Bis(2-chloroethyl)ether'),
+    ('SVOCs', 'Chlorinated Hydrocarbons', 'Bis(2-chloroisopropyl)ether'),
+    ('SVOCs', 'Nitrosoamines', 'N-Nitrosodi-n-propylamine'),
+    ('SVOCs', 'Pesticides', 'Dinoseb'),
+    ('SVOCs', 'Phthalates', 'Bis(2-ethylhexyl)phthalate'),
+    ('SVOCs', 'Phthalates', 'Butyl benzyl phthalate'),
+    ('SVOCs', 'Phthalates', 'Di-n-butyl phthalate'),
+    ('SVOCs', 'Phthalates', 'Di-n-octyl phthalate'),
+    ('SVOCs', 'Phthalates', 'Diethyl phthalate'),
+    ('SVOCs', 'Phthalates', 'Dimethyl phthalate'),
 ]
+
 
 # lookup: norm(compound) -> (voc_svoc, group)
 VOC_MAP = {v.lower(): {"vs": vs, "grp": grp} for vs,grp,v in VOC_COMPOUND_ORDER}
@@ -595,133 +581,7 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
     ws.freeze_panes="H3"
 
 # ── VOC SHEET ─────────────────────────────────────────────────────────────────
-def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
-    df = df.copy()
 
-    # (sample_id, depth) pairs: sample ASC, depth DESC
-    pairs = sorted(
-        df[["sample_id","depth"]].drop_duplicates().values.tolist(),
-        key=lambda x: (sort_key(x[0]), -(x[1] or 0))
-    )
-
-    # ── HEADERS ───────────────────────────────────────────────────────────────
-    # Row 1: A=קבוצה(merged A1:A2), B=קבוצה(merged B1:B2), C=שם התרכובת(merged C1:C2),
-    #        D=CAS(merged D1:D2), E=VSL(merged E1:E2), F=TIER1(merged F1:F2),
-    #        G=יחידות(merged G1:H2 — G and H merged!), I=שם קידוח row1 / עומק row2
-    for ci, h in enumerate(["קבוצה","קבוצה","שם התרכובת","CAS","VSL",t1lbl],1):
-        ws.merge_cells(start_row=1,start_column=ci,end_row=2,end_column=ci)
-        style_hdr(ws.cell(1,ci,h), HDR_BLUE_FILL, sz=9)
-        ws.cell(1,ci).alignment = Alignment(horizontal="center",vertical="center",wrap_text=True)
-        ws.cell(1,ci).fill = HDR_BLUE_FILL; ws.cell(1,ci).border = thin_border()
-    # G1:H2 merged = יחידות
-    ws.merge_cells(start_row=1,start_column=7,end_row=2,end_column=8)
-    style_hdr(ws.cell(1,7,"יחידות"), HDR_BLUE_FILL, sz=9)
-    ws.cell(1,7).alignment = Alignment(horizontal="center",vertical="center",wrap_text=True)
-    ws.cell(1,7).fill = HDR_BLUE_FILL; ws.cell(1,7).border = thin_border()
-    # col I: שם קידוח (row1) / עומק (row2) — not merged
-    style_hdr(ws.cell(1,9,"שם קידוח"), HDR_BLUE_FILL, sz=9)
-    style_hdr(ws.cell(2,9,"עומק"),     HDR_BLUE_FILL, sz=9)
-
-    # sample columns from col 10
-    prev_sid = None; sid_col_start = {}
-    for ci, (sid, depth) in enumerate(pairs, 10):
-        sid_val = sid if sid != prev_sid else None
-        style_hdr(ws.cell(1,ci,sid_val), HDR_BLUE_FILL, sz=9)
-        style_hdr(ws.cell(2,ci,depth),   HDR_BLUE_FILL, sz=9)
-        if sid != prev_sid: sid_col_start[sid] = ci
-        prev_sid = sid
-    for sid, sc in sid_col_start.items():
-        cols = [ci for ci,(s,_) in enumerate(pairs,10) if s==sid]
-        if len(cols) > 1:
-            ws.merge_cells(start_row=1,start_column=sc,end_row=1,end_column=cols[-1])
-            c = ws.cell(1,sc)
-            c.alignment = Alignment(horizontal="center",vertical="center")
-            c.fill = HDR_BLUE_FILL; c.border = thin_border()
-
-    # ── ALS DATA LOOKUP ───────────────────────────────────────────────────────
-    als_data = {}  # norm(cmp) -> {(sid,depth): result_str}
-    for _, r in df.iterrows():
-        k = norm(r["compound"])
-        if k not in als_data: als_data[k] = {}
-        als_data[k][(r["sample_id"], r["depth"])] = r["result_str"]
-    # add dot<->comma variants
-    for k in list(als_data.keys()):
-        for alt in [k.replace(".",","), k.replace(",",".")]:
-            if alt not in als_data: als_data[alt] = als_data[k]
-
-    # ── WRITE DATA ROWS (exact order from VOC_COMPOUND_ORDER) ─────────────────
-    # Data starts row 3. Cols: A=vs, B=grp, C=compound, D=CAS, E=VSL, F=TIER1,
-    #                          G:H=units(merged), I=blank, J+=samples
-    for row_i, (vs, grp, cmp) in enumerate(VOC_COMPOUND_ORDER, 3):
-        vsl, tier1, cas = get_thresh(cmp, thresh_dict, t1col)
-        cmp_data = als_data.get(norm(cmp)) or als_data.get(norm(cmp).replace(".",",")) or {}
-
-        style_data(ws.cell(row_i,1, vs),    sz=9)
-        style_data(ws.cell(row_i,2, grp),   sz=9)
-        style_data(ws.cell(row_i,3, cmp),   sz=9)
-        style_data(ws.cell(row_i,4, cas),   sz=9)
-        style_data(ws.cell(row_i,5, vsl),   sz=9)
-        style_data(ws.cell(row_i,6, tier1), sz=9)
-        # G:H merged = units
-        ws.merge_cells(start_row=row_i,start_column=7,end_row=row_i,end_column=8)
-        style_data(ws.cell(row_i,7,"mg/kg"), sz=9)
-        ws.cell(row_i,7).alignment = Alignment(horizontal="center",vertical="center")
-        style_data(ws.cell(row_i,9, None),  sz=9)
-        for ci,(sid,depth) in enumerate(pairs,10):
-            rs = cmp_data.get((sid,depth),"")
-            style_data(ws.cell(row_i,ci,rs), check_exceed(rs,vsl,tier1), sz=9)
-
-    # ── MERGE col A: A3:A32=VOCs, A33:A96=SVOCs ──────────────────────────────
-    for r1,r2,val in [(3,32,"VOCs"),(33,96,"SVOCs")]:
-        ws.merge_cells(start_row=r1,start_column=1,end_row=r2,end_column=1)
-        c = ws.cell(r1,1,val)
-        c.font = Font(bold=True,name="Arial",size=9)
-        c.alignment = Alignment(horizontal="center",vertical="center",wrap_text=True)
-        c.border = thin_border()
-
-    # ── MERGE col B: exact ranges from reference file ─────────────────────────
-    b_ranges = [
-        (3, 12,  "Non-Halogenated VOCs"),
-        (13,16,  "BTEX"),
-        (17,32,  "Halogenated VOCs"),
-        (33,37,  "Phenols & Naphtols"),
-        (38,53,  "PAHs"),
-        (54,57,  "Anilines"),
-        (58,65,  "Aromatic Compounds"),
-        (66,66,  "Alcohols"),
-        (67,69,  "Aldehydes / Ketones"),
-        (70,75,  "Chlorophenols"),
-        (76,85,  "Nitroaromatic Compounds"),
-        (86,88,  "Chlorinated Hydrocarbons"),
-        (89,89,  "Nitrosoamines"),
-        (90,90,  "Pesticides"),
-        (91,96,  "Phthalates"),
-    ]
-    for r1,r2,val in b_ranges:
-        if r2 > r1:
-            ws.merge_cells(start_row=r1,start_column=2,end_row=r2,end_column=2)
-        c = ws.cell(r1,2,val)
-        c.font = Font(bold=True,name="Arial",size=9)
-        c.alignment = Alignment(horizontal="center",vertical="center",wrap_text=True)
-        c.border = thin_border()
-
-    # ── COLUMN WIDTHS ─────────────────────────────────────────────────────────
-    ws.column_dimensions["A"].width = 8
-    ws.column_dimensions["B"].width = 22
-    ws.column_dimensions["C"].width = 35
-    ws.column_dimensions["D"].width = 12
-    ws.column_dimensions["E"].width = 10
-    ws.column_dimensions["F"].width = 12
-    ws.column_dimensions["G"].width = 7
-    ws.column_dimensions["H"].width = 7
-    ws.column_dimensions["I"].width = 12
-    for ci in range(10, 10+len(pairs)):
-        ws.column_dimensions[get_column_letter(ci)].width = 10
-    ws.row_dimensions[1].height = 20
-    ws.row_dimensions[2].height = 15
-    ws.freeze_panes = "J3"
-
-# ── PFAS SHEET ────────────────────────────────────────────────────────────────
 def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
     df=df.copy()
     samples=sorted(df["sample_id"].unique(),key=sort_key)
@@ -792,133 +652,7 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
     ws.freeze_panes="H3"
 
 # ── VOC SHEET ─────────────────────────────────────────────────────────────────
-def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
-    df = df.copy()
 
-    # (sample_id, depth) pairs: sample ASC, depth DESC (shallow last = bottom of column)
-    pairs = sorted(
-        df[["sample_id","depth"]].drop_duplicates().values.tolist(),
-        key=lambda x: (sort_key(x[0]), -(x[1] or 0))
-    )
-
-    # ── HEADERS row 1-2 ──────────────────────────────────────────────────────
-    fixed = ["קבוצה", "קבוצה", "שם התרכובת", "CAS", "VSL", t1lbl, "יחידות", "שם קידוח"]
-    for ci, h in enumerate(fixed, 1):
-        style_hdr(ws.cell(1, ci, h), HDR_BLUE_FILL, sz=9)
-    # merge rows 1-2 for cols A-G
-    for ci in range(1, 8):
-        ws.merge_cells(start_row=1, start_column=ci, end_row=2, end_column=ci)
-        c = ws.cell(1, ci)
-        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        c.fill = HDR_BLUE_FILL; c.border = thin_border()
-    # col H: not merged
-    style_hdr(ws.cell(2, 8, "עומק"), HDR_BLUE_FILL, sz=9)
-
-    # sample columns
-    prev_sid = None; sid_col_start = {}
-    for ci, (sid, depth) in enumerate(pairs, 9):
-        sid_val = sid if sid != prev_sid else None
-        style_hdr(ws.cell(1, ci, sid_val), HDR_BLUE_FILL, sz=9)
-        style_hdr(ws.cell(2, ci, depth),   HDR_BLUE_FILL, sz=9)
-        if sid != prev_sid: sid_col_start[sid] = ci
-        prev_sid = sid
-    # merge row-1 sample name across depth columns
-    for sid, sc in sid_col_start.items():
-        cols = [ci for ci, (s, _) in enumerate(pairs, 9) if s == sid]
-        if len(cols) > 1:
-            ws.merge_cells(start_row=1, start_column=sc, end_row=1, end_column=cols[-1])
-            c = ws.cell(1, sc)
-            c.alignment = Alignment(horizontal="center", vertical="center")
-            c.fill = HDR_BLUE_FILL; c.border = thin_border()
-
-    # ── BUILD ALS lookup: norm(compound) -> result per (sid,depth) ──────────
-    als_data = {}  # norm(cmp) -> {(sid,depth): result_str}
-    for _, r in df.iterrows():
-        k = norm(r["compound"])
-        if k not in als_data: als_data[k] = {}
-        als_data[k][(r["sample_id"], r["depth"])] = r["result_str"]
-
-    # also map with dot<->comma variants
-    als_keys_extra = {}
-    for k, v in als_data.items():
-        alt = k.replace(".", ",")
-        if alt not in als_data: als_keys_extra[alt] = v
-        alt2 = k.replace(",", ".")
-        if alt2 not in als_data: als_keys_extra[alt2] = v
-    als_data.update(als_keys_extra)
-
-    # ── WRITE DATA ROWS ───────────────────────────────────────────────────────
-    data_start_row = 3
-    row_i = data_start_row
-
-    # track merge ranges for col A and col B
-    vs_ranges  = {}  # vs  -> [first_row, last_row]
-    grp_ranges = {}  # grp -> [first_row, last_row]
-
-    for vs, grp, cmp in VOC_COMPOUND_ORDER:
-        vsl, tier1, cas = get_thresh(cmp, thresh_dict, t1col)
-        unit = "mg/kg"
-
-        # find ALS data
-        cmp_key = norm(cmp)
-        cmp_key2 = cmp_key.replace(".", ",")
-        cmp_data = als_data.get(cmp_key) or als_data.get(cmp_key2) or {}
-
-        # col A: vs (blank if same as previous row - merge later)
-        style_data(ws.cell(row_i, 1, vs),   sz=9)
-        style_data(ws.cell(row_i, 2, grp),  sz=9)
-        style_data(ws.cell(row_i, 3, cmp),  sz=9)
-        style_data(ws.cell(row_i, 4, cas),  sz=9)
-        style_data(ws.cell(row_i, 5, vsl),  sz=9)
-        style_data(ws.cell(row_i, 6, tier1),sz=9)
-        style_data(ws.cell(row_i, 7, unit), sz=9)
-        style_data(ws.cell(row_i, 8, None), sz=9)
-
-        for ci, (sid, depth) in enumerate(pairs, 9):
-            rs = cmp_data.get((sid, depth), "")
-            style_data(ws.cell(row_i, ci, rs), check_exceed(rs, vsl, tier1), sz=9)
-
-        # track ranges for merging
-        if vs not in vs_ranges:   vs_ranges[vs]   = [row_i, row_i]
-        else:                      vs_ranges[vs][1]  = row_i
-        grp_key = (vs, grp)
-        if grp_key not in grp_ranges: grp_ranges[grp_key] = [row_i, row_i]
-        else:                          grp_ranges[grp_key][1] = row_i
-
-        row_i += 1
-
-    # ── MERGE col A (VOCs / SVOCs) ────────────────────────────────────────────
-    for vs, (r1, r2) in vs_ranges.items():
-        if r2 > r1:
-            ws.merge_cells(start_row=r1, start_column=1, end_row=r2, end_column=1)
-        c = ws.cell(r1, 1)
-        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        c.border = thin_border()
-
-    # ── MERGE col B (groups) ─────────────────────────────────────────────────
-    for (vs, grp), (r1, r2) in grp_ranges.items():
-        if r2 > r1:
-            ws.merge_cells(start_row=r1, start_column=2, end_row=r2, end_column=2)
-        c = ws.cell(r1, 2)
-        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        c.border = thin_border()
-
-    # ── COLUMN WIDTHS ─────────────────────────────────────────────────────────
-    ws.column_dimensions["A"].width = 8
-    ws.column_dimensions["B"].width = 22
-    ws.column_dimensions["C"].width = 35
-    ws.column_dimensions["D"].width = 12
-    ws.column_dimensions["E"].width = 10
-    ws.column_dimensions["F"].width = 12
-    ws.column_dimensions["G"].width = 9
-    ws.column_dimensions["H"].width = 12
-    for ci in range(9, 9 + len(pairs)):
-        ws.column_dimensions[get_column_letter(ci)].width = 10
-    ws.row_dimensions[1].height = 20
-    ws.row_dimensions[2].height = 15
-    ws.freeze_panes = "I3"
-
-# ── PFAS SHEET ────────────────────────────────────────────────────────────────
 def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
     df=df.copy()
     samples=sorted(df["sample_id"].unique(),key=sort_key)
@@ -989,79 +723,135 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
     ws.freeze_panes="H3"
 
 # ── VOC SHEET ─────────────────────────────────────────────────────────────────
+
+
+
 def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
-    df=df.copy()
+    """
+    VOC+SVOC sheet formatter:
+    - Matches the reference workbook structure (merged cells + exact compound order).
+    - Columns A-B are grouped/merged, columns G:H are merged for every data row.
+    """
+    df = df.copy()
 
     # build (sample_id, depth) pairs sorted by sample ASC, depth DESC (bottom=shallow)
     pairs = sorted(
-        df[["sample_id","depth"]].drop_duplicates().values.tolist(),
+        df[["sample_id", "depth"]].drop_duplicates().values.tolist(),
         key=lambda x: (sort_key(x[0]), -(x[1] or 0))
     )
 
-    # headers row 1-2
-    fixed=["קבוצה","קבוצה","שם התרכובת","CAS","VSL",t1lbl,"יחידות","שם קידוח"]
-    for ci,h in enumerate(fixed,1): style_hdr(ws.cell(1,ci,h), HDR_BLUE_FILL, sz=9)
+    # ── headers row 1-2
+    fixed = ["קבוצה", "קבוצה", "שם התרכובת", "CAS", "VSL", t1lbl, "יחידות", "שם קידוח"]
+    for ci, h in enumerate(fixed, 1):
+        style_hdr(ws.cell(1, ci, h), HDR_BLUE_FILL, sz=9)
+
     # merge rows 1-2 for cols A-G
-    for ci in range(1,8):
-        ws.merge_cells(start_row=1,start_column=ci,end_row=2,end_column=ci)
-        ws.cell(1,ci).alignment=Alignment(horizontal="center",vertical="center",wrap_text=True)
-        ws.cell(1,ci).fill=HDR_BLUE_FILL; ws.cell(1,ci).border=thin_border()
+    for ci in range(1, 8):
+        ws.merge_cells(start_row=1, start_column=ci, end_row=2, end_column=ci)
+        ws.cell(1, ci).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.cell(1, ci).fill = HDR_BLUE_FILL
+        ws.cell(1, ci).border = thin_border()
+
     # col H: "שם קידוח" row1, "עומק" row2 - NOT merged
-    style_hdr(ws.cell(1,8,"שם קידוח"), HDR_BLUE_FILL, sz=9)
-    style_hdr(ws.cell(2,8,"עומק"),     HDR_BLUE_FILL, sz=9)
+    style_hdr(ws.cell(1, 8, "שם קידוח"), HDR_BLUE_FILL, sz=9)
+    style_hdr(ws.cell(2, 8, "עומק"), HDR_BLUE_FILL, sz=9)
 
     # sample columns: one per (sid, depth)
-    prev_sid=None; sid_merge_start={}
-    for ci,(sid,depth) in enumerate(pairs, 9):
-        sid_val = sid if sid!=prev_sid else None
-        style_hdr(ws.cell(1,ci,sid_val), HDR_BLUE_FILL, sz=9)
-        style_hdr(ws.cell(2,ci,depth),   HDR_BLUE_FILL, sz=9)
-        if sid!=prev_sid: sid_merge_start[sid]=ci
-        prev_sid=sid
+    prev_sid = None
+    sid_merge_start = {}
+    for ci, (sid, depth) in enumerate(pairs, 9):
+        sid_val = sid if sid != prev_sid else None
+        style_hdr(ws.cell(1, ci, sid_val), HDR_BLUE_FILL, sz=9)
+        style_hdr(ws.cell(2, ci, depth), HDR_BLUE_FILL, sz=9)
+        if sid != prev_sid:
+            sid_merge_start[sid] = ci
+        prev_sid = sid
+
     # merge sample name row1 across its depth columns
     for sid, start_ci in sid_merge_start.items():
-        cols = [ci for ci,(s,_) in enumerate(pairs,9) if s==sid]
-        if len(cols)>1:
-            ws.merge_cells(start_row=1,start_column=start_ci,end_row=1,end_column=cols[-1])
-            ws.cell(1,start_ci).alignment=Alignment(horizontal="center",vertical="center")
-            ws.cell(1,start_ci).fill=HDR_BLUE_FILL; ws.cell(1,start_ci).border=thin_border()
+        cols = [ci for ci, (s, _) in enumerate(pairs, 9) if s == sid]
+        if len(cols) > 1:
+            ws.merge_cells(start_row=1, start_column=start_ci, end_row=1, end_column=cols[-1])
+            ws.cell(1, start_ci).alignment = Alignment(horizontal="center", vertical="center")
+            ws.cell(1, start_ci).fill = HDR_BLUE_FILL
+            ws.cell(1, start_ci).border = thin_border()
 
-    # build ordered compound list using VOC_MAP
-    def get_voc_info(cmp):
-        k=norm(cmp)
-        info=VOC_MAP.get(k,{})
-        return info.get("vs","Other"), info.get("grp","Other")
+    # ── data rows (start at row 3) in EXACT reference order
+    start_row = 3
+    for i, (vs, grp, cmp) in enumerate(VOC_COMPOUND_ORDER):
+        row_i = start_row + i
+        df_c = df[df["compound"] == cmp]
 
-    # collect unique compounds ordered by VOC_GROUP_ORDER
-    all_cmps = list(df["compound"].unique())
-    def cmp_sort_key(c):
-        vs,grp = get_voc_info(c)
-        try:
-            gi = next(i for i,(v,g) in enumerate(VOC_GROUP_ORDER) if v==vs and g==grp)
-        except: gi=999
-        return (gi, c)
-    all_cmps.sort(key=cmp_sort_key)
+        vsl, tier1, cas = get_thresh(cmp, thresh_dict, t1col)
+        unit = (df_c.iloc[0]["unit"] if not df_c.empty else "mg/kg") or "mg/kg"
 
-    # write data rows starting row 3
-    for row_i, cmp in enumerate(all_cmps, 3):
-        vs, grp = get_voc_info(cmp)
-        df_c = df[df["compound"]==cmp]
-        vsl,tier1,cas = get_thresh(cmp, thresh_dict, t1col)
-        unit = df_c.iloc[0]["unit"] if not df_c.empty else "mg/kg"
-        for ci,val in enumerate([vs,grp,cmp,cas,vsl,tier1,unit,None],1):
-            style_data(ws.cell(row_i,ci,val),sz=9)
-        for ci,(sid,depth) in enumerate(pairs,9):
-            sub = df_c[(df_c["sample_id"]==sid)&(df_c["depth"]==depth)]
+        # Columns A-B will be merged later. Put placeholders for now.
+        for ci, val in enumerate([vs, grp, cmp, cas, vsl, tier1, unit, ""], 1):
+            style_data(ws.cell(row_i, ci, val), sz=9)
+
+        # Merge Units across G:H for every data row (as in the reference)
+        ws.merge_cells(start_row=row_i, start_column=7, end_row=row_i, end_column=8)
+        ws.cell(row_i, 7).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.cell(row_i, 7).border = thin_border()
+
+        # sample results
+        for ci, (sid, depth) in enumerate(pairs, 9):
+            sub = df_c[(df_c["sample_id"] == sid) & (df_c["depth"] == depth)]
             rs = sub.iloc[0]["result_str"] if not sub.empty else ""
-            style_data(ws.cell(row_i,ci,rs), check_exceed(rs,vsl,tier1), sz=9)
+            style_data(ws.cell(row_i, ci, rs), check_exceed(rs, vsl, tier1), sz=9)
 
-    ws.column_dimensions["A"].width=8; ws.column_dimensions["B"].width=22
-    ws.column_dimensions["C"].width=35; ws.column_dimensions["D"].width=12
-    ws.column_dimensions["E"].width=10; ws.column_dimensions["F"].width=12
-    ws.column_dimensions["G"].width=9;  ws.column_dimensions["H"].width=12
-    for ci in range(9, 9+len(pairs)): ws.column_dimensions[get_column_letter(ci)].width=10
-    ws.row_dimensions[1].height=20; ws.row_dimensions[2].height=15
-    ws.freeze_panes="I3"
+    last_row = start_row + len(VOC_COMPOUND_ORDER) - 1
+
+    # ── merge group columns A and B exactly like the reference (contiguous blocks)
+    def merge_blocks(col_idx):
+        cur_val = None
+        block_start = None
+        for r in range(start_row, last_row + 2):  # sentinel at end
+            val = ws.cell(r, col_idx).value if r <= last_row else None
+            if r == start_row:
+                cur_val = val
+                block_start = r
+                continue
+            if val != cur_val:
+                block_end = r - 1
+                if cur_val not in (None, "") and block_end > block_start:
+                    ws.merge_cells(start_row=block_start, start_column=col_idx, end_row=block_end, end_column=col_idx)
+                    top = ws.cell(block_start, col_idx)
+                    top.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                    top.border = thin_border()
+                    # clear inner cells (Excel-style)
+                    for rr in range(block_start + 1, block_end + 1):
+                        ws.cell(rr, col_idx).value = None
+                cur_val = val
+                block_start = r
+
+    merge_blocks(1)  # col A
+    merge_blocks(2)  # col B
+
+    # ── column widths (match reference workbook)
+    ws.column_dimensions["A"].width = 13
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 35
+    ws.column_dimensions["D"].width = 12
+    ws.column_dimensions["E"].width = 10
+    ws.column_dimensions["F"].width = 13
+    ws.column_dimensions["G"].width = 13
+    ws.column_dimensions["H"].width = 13
+    for ci in range(9, 9 + len(pairs)):
+        ws.column_dimensions[get_column_letter(ci)].width = 13
+
+    # ── row heights (match reference workbook)
+    ws.row_dimensions[1].height = 30
+    ws.row_dimensions[2].height = 18
+    for r in range(3, last_row + 1):
+        ws.row_dimensions[r].height = 17.1
+    # reference had a slightly different height on row 85
+    if last_row >= 85:
+        ws.row_dimensions[85].height = 16.5
+
+    ws.freeze_panes = "I3"
+
+
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
 st.sidebar.header("⚙️ הגדרות ערכי סף")
