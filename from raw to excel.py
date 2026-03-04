@@ -1471,7 +1471,7 @@ def build_word_report(table_configs, thresh_dict, t1col, t1lbl):
 tab_excel, tab_word = st.tabs(["📊 יצוא Excel", "📄 יצוא Word"])
 
 with tab_excel:
-    # ── SIDEBAR ───────────────────────────────────────────────────────────────────────
+    # ── SIDEBAR
     st.sidebar.header("⚙️ הגדרות ערכי סף")
     st.sidebar.markdown("🟡 חריגה מ-VSL &nbsp;&nbsp;&nbsp; 🟠 חריגה מ-TIER 1")
     st.sidebar.markdown("---")
@@ -1491,52 +1491,50 @@ with tab_excel:
         st.subheader("📂 קבצי ALS")
         data_files=st.file_uploader("העלה קבצי ALS",type=["xlsx","xls"],accept_multiple_files=True,key="data")
 
-    if not thr_file: st.info("👆 העלה קובץ ערכי סף וקבצי ALS"); st.stop()
-    if not data_files: st.warning("⚠️ העלה קבצי ALS"); st.stop()
-
-    thresh_dict=load_threshold_file(thr_file.read())
-    st.success(f"✅ {len(thresh_dict)-1} ערכי סף | {land_use} | {aquifer} | {depth}")
-
-    all_data=[]
-    for f in data_files:
-        df,err=parse_als_file(f.read(),f.name)
-        if err: st.warning(f"⚠️ {f.name}: {err}")
-        else: all_data.append(df); st.success(f"✅ {f.name} — {len(df)} תוצאות")
-
-    if not all_data: st.error("לא נטענו נתונים."); st.stop()
-    df_all=pd.concat(all_data,ignore_index=True)
-
-    with st.expander(f"👁️ תצוגה מקדימה ({len(df_all)} שורות)"): st.dataframe(df_all.head(30),use_container_width=True)
-    with st.expander("קבוצות שנמצאו"): st.write(df_all["group"].unique().tolist())
-
-    def dg(kw): return df_all[df_all["group"].str.contains("|".join(kw),case=False,na=False)]
-    tph_df   =dg(["petroleum","tph","hydrocarbon"])
-    metals_df=dg(["metal","cation","extractable"])
-    pfas_df  =dg(["perfluor","pfas","fluorin"])
-    voc_df   =dg(["voc","svoc","btex","aromatic","halogenated","volatile",
-                   "alcohol","aldehyde","ketone","phenol","pah","aniline",
-                   "nitro","phthalate","pesticide","pcb","other"])
-
-    wb_out=Workbook(); wb_out.remove(wb_out.active)
-    if not tph_df.empty:
-        write_tph_sheet(wb_out.create_sheet("TPH"),tph_df,thresh_dict,t1col,t1lbl)
-        st.info(f"✅ TPH: {tph_df['sample_id'].nunique()} קידוחים")
-    if not metals_df.empty:
-        write_metals_sheet(wb_out.create_sheet("Metals"),metals_df,thresh_dict,t1col,t1lbl)
-        st.info(f"✅ Metals: {metals_df['sample_id'].nunique()} קידוחים")
-    if not voc_df.empty:
-        write_voc_sheet(wb_out.create_sheet("VOC+SVOC"),voc_df,thresh_dict,t1col,t1lbl)
-        st.info(f"✅ VOC+SVOC: {voc_df['sample_id'].nunique()} קידוחים")
-    if not pfas_df.empty:
-        write_pfas_sheet(wb_out.create_sheet("PFAS"),pfas_df,thresh_dict,t1col,t1lbl)
-        st.info(f"✅ PFAS: {pfas_df['sample_id'].nunique()} קידוחים")
-    if not wb_out.sheetnames:
-        wb_out.create_sheet("Results"); st.warning("לא זוהו קבוצות")
-
-    st.markdown("---")
-    buf=io.BytesIO(); wb_out.save(buf); buf.seek(0)
-    st.download_button("⬇️ הורד קובץ Excel מעובד",data=buf,file_name="soil_report.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+    if not thr_file:
+        st.info("👆 העלה קובץ ערכי סף וקבצי ALS")
+    elif not data_files:
+        st.warning("⚠️ העלה קבצי ALS")
+    else:
+        thresh_dict=load_threshold_file(thr_file.read())
+        st.success(f"✅ {len(thresh_dict)-1} ערכי סף | {land_use} | {aquifer} | {depth}")
+        all_data=[]
+        for f in data_files:
+            df,err=parse_als_file(f.read(),f.name)
+            if err: st.warning(f"⚠️ {f.name}: {err}")
+            else: all_data.append(df); st.success(f"✅ {f.name} — {len(df)} תוצאות")
+        if not all_data:
+            st.error("לא נטענו נתונים.")
+        else:
+            df_all=pd.concat(all_data,ignore_index=True)
+            with st.expander(f"👁️ תצוגה מקדימה ({len(df_all)} שורות)"): st.dataframe(df_all.head(30),use_container_width=True)
+            with st.expander("קבוצות שנמצאו"): st.write(df_all["group"].unique().tolist())
+            def dg(kw): return df_all[df_all["group"].str.contains("|".join(kw),case=False,na=False)]
+            tph_df   =dg(["petroleum","tph","hydrocarbon"])
+            metals_df=dg(["metal","cation","extractable"])
+            pfas_df  =dg(["perfluor","pfas","fluorin"])
+            voc_df   =dg(["voc","svoc","btex","aromatic","halogenated","volatile",
+                           "alcohol","aldehyde","ketone","phenol","pah","aniline",
+                           "nitro","phthalate","pesticide","pcb","other"])
+            wb_out=Workbook(); wb_out.remove(wb_out.active)
+            if not tph_df.empty:
+                write_tph_sheet(wb_out.create_sheet("TPH"),tph_df,thresh_dict,t1col,t1lbl)
+                st.info(f"✅ TPH: {tph_df['sample_id'].nunique()} קידוחים")
+            if not metals_df.empty:
+                write_metals_sheet(wb_out.create_sheet("Metals"),metals_df,thresh_dict,t1col,t1lbl)
+                st.info(f"✅ Metals: {metals_df['sample_id'].nunique()} קידוחים")
+            if not voc_df.empty:
+                write_voc_sheet(wb_out.create_sheet("VOC+SVOC"),voc_df,thresh_dict,t1col,t1lbl)
+                st.info(f"✅ VOC+SVOC: {voc_df['sample_id'].nunique()} קידוחים")
+            if not pfas_df.empty:
+                write_pfas_sheet(wb_out.create_sheet("PFAS"),pfas_df,thresh_dict,t1col,t1lbl)
+                st.info(f"✅ PFAS: {pfas_df['sample_id'].nunique()} קידוחים")
+            if not wb_out.sheetnames:
+                wb_out.create_sheet("Results"); st.warning("לא זוהו קבוצות")
+            st.markdown("---")
+            buf=io.BytesIO(); wb_out.save(buf); buf.seek(0)
+            st.download_button("⬇️ הורד קובץ Excel מעובד",data=buf,file_name="soil_report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
 
 with tab_word:
     st.header("📄 יצוא דוח Word")
