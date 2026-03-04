@@ -7,7 +7,7 @@ import io, re
 
 st.set_page_config(page_title="דוח סקר קרקע", layout="wide", page_icon="🧪")
 st.title("🧪 מערכת עיבוד תוצאות מעבדה")
-st.caption("v2.6 - VOC groups + PFAS multi-depth + header merge")
+st.caption("v2.7 - VOC exact order + col A/B merge")
 st.markdown("---")
 
 # ── STYLES ────────────────────────────────────────────────────────────────────
@@ -143,165 +143,125 @@ THRESH_METAL_MAP = {
 }
 
 
-# ── VOC/SVOC COMPOUND MAP (from reference file) ───────────────────────────────
-# Maps compound name (lowercased) -> {voc_svoc, group, cas}
-VOC_MAP = {
-    # VOCs - Non-Halogenated
-    "1.2.4-trimethylbenzene":        {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
-    "1.3.5-trimethylbenzene":        {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
-    "mtbe":                          {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
-    "styrene":                       {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
-    "n-butylbenzene":                {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
-    "n-propylbenzene":               {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
-    "isopropylbenzene":              {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
-    "acetone":                       {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
-    "2-butanone (mek)":              {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
-    "1.4-dioxane":                   {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
-    "1,4-dioxane":                   {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
-    # VOCs - BTEX
-    "benzene":                       {"vs":"VOCs","grp":"BTEX"},
-    "toluene":                       {"vs":"VOCs","grp":"BTEX"},
-    "ethylbenzene":                  {"vs":"VOCs","grp":"BTEX"},
-    "sum of xylenes":                {"vs":"VOCs","grp":"BTEX"},
-    "xylenes":                       {"vs":"VOCs","grp":"BTEX"},
-    "o-xylene":                      {"vs":"VOCs","grp":"BTEX"},
-    "m-xylene":                      {"vs":"VOCs","grp":"BTEX"},
-    "p-xylene":                      {"vs":"VOCs","grp":"BTEX"},
-    "m,p-xylene":                    {"vs":"VOCs","grp":"BTEX"},
-    # VOCs - Halogenated
-    "1.1-dichloroethane":            {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "1,1-dichloroethane":            {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "1.1-dichloroethene":            {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "1,1-dichloroethene":            {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "1.2-dichloroethane":            {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "1,2-dichloroethane":            {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "1.2-dichloropropane":           {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "1,2-dichloropropane":           {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "chlorobenzene":                 {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "chloroform":                    {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "dichloromethane":               {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "tetrachloroethene":             {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "tetrachloromethane":            {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "trichloroethene":               {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "vinyl chloride":                {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "cis-1.2-dichloroethene":        {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "cis-1,2-dichloroethene":        {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "trans-1.2-dichloroethene":      {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "trans-1,2-dichloroethene":      {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "1.4-dichlorobenzene":           {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "1,4-dichlorobenzene":           {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "1.2-dichlorobenzene":           {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "1,2-dichlorobenzene":           {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "1.3-dichlorobenzene":           {"vs":"VOCs","grp":"Halogenated VOCs"},
-    "1,3-dichlorobenzene":           {"vs":"VOCs","grp":"Halogenated VOCs"},
-    # SVOCs - Phenols
-    "2.4-dimethylphenol":            {"vs":"SVOCs","grp":"Phenols & Naphtols"},
-    "2,4-dimethylphenol":            {"vs":"SVOCs","grp":"Phenols & Naphtols"},
-    "2-methylphenol":                {"vs":"SVOCs","grp":"Phenols & Naphtols"},
-    "3 & 4-methylphenol":            {"vs":"SVOCs","grp":"Phenols & Naphtols"},
-    "4-chloro-3-methylphenol":       {"vs":"SVOCs","grp":"Phenols & Naphtols"},
-    "phenol":                        {"vs":"SVOCs","grp":"Phenols & Naphtols"},
-    # SVOCs - PAHs
-    "acenaphthene":                  {"vs":"SVOCs","grp":"PAHs"},
-    "acenaphthylene":                {"vs":"SVOCs","grp":"PAHs"},
-    "anthracene":                    {"vs":"SVOCs","grp":"PAHs"},
-    "benz(a)anthracene":             {"vs":"SVOCs","grp":"PAHs"},
-    "benzo(a)pyrene":                {"vs":"SVOCs","grp":"PAHs"},
-    "benzo(b)fluoranthene":          {"vs":"SVOCs","grp":"PAHs"},
-    "benzo(g.h.i)perylene":          {"vs":"SVOCs","grp":"PAHs"},
-    "benzo(g,h,i)perylene":          {"vs":"SVOCs","grp":"PAHs"},
-    "benzo(k)fluoranthene":          {"vs":"SVOCs","grp":"PAHs"},
-    "chrysene":                      {"vs":"SVOCs","grp":"PAHs"},
-    "dibenz(a.h)anthracene":         {"vs":"SVOCs","grp":"PAHs"},
-    "dibenz(a,h)anthracene":         {"vs":"SVOCs","grp":"PAHs"},
-    "fluoranthene":                  {"vs":"SVOCs","grp":"PAHs"},
-    "fluorene":                      {"vs":"SVOCs","grp":"PAHs"},
-    "indeno(1.2.3.cd)pyrene":        {"vs":"SVOCs","grp":"PAHs"},
-    "indeno(1,2,3-cd)pyrene":        {"vs":"SVOCs","grp":"PAHs"},
-    "naphthalene":                   {"vs":"SVOCs","grp":"PAHs"},
-    "phenanthrene":                  {"vs":"SVOCs","grp":"PAHs"},
-    "pyrene":                        {"vs":"SVOCs","grp":"PAHs"},
-    # SVOCs - Anilines
-    "4-chloroaniline":               {"vs":"SVOCs","grp":"Anilines"},
-    "aniline":                       {"vs":"SVOCs","grp":"Anilines"},
-    "benzidine":                     {"vs":"SVOCs","grp":"Anilines"},
-    "diphenylamine":                 {"vs":"SVOCs","grp":"Anilines"},
-    # SVOCs - Aromatic Compounds
-    "1,1'-biphenyl":                 {"vs":"SVOCs","grp":"Aromatic Compounds"},
-    "1-chloronaphthalene":           {"vs":"SVOCs","grp":"Aromatic Compounds"},
-    "2-chloronaphthalene":           {"vs":"SVOCs","grp":"Aromatic Compounds"},
-    "2-methylnaphthalene":           {"vs":"SVOCs","grp":"Aromatic Compounds"},
-    "4-bromophenyl phenyl ether":    {"vs":"SVOCs","grp":"Aromatic Compounds"},
-    "4-chlorophenyl phenyl ether":   {"vs":"SVOCs","grp":"Aromatic Compounds"},
-    "carbazole":                     {"vs":"SVOCs","grp":"Aromatic Compounds"},
-    "dibenzofuran":                  {"vs":"SVOCs","grp":"Aromatic Compounds"},
-    # SVOCs - Alcohols
-    "benzyl alcohol":                {"vs":"SVOCs","grp":"Alcohols"},
-    # SVOCs - Aldehydes/Ketones
-    "6-caprolactam":                 {"vs":"SVOCs","grp":"Aldehydes / Ketones"},
-    "acetophenone":                  {"vs":"SVOCs","grp":"Aldehydes / Ketones"},
-    "isophorone":                    {"vs":"SVOCs","grp":"Aldehydes / Ketones"},
-    # SVOCs - Chlorophenols
-    "2-chlorophenol":                {"vs":"SVOCs","grp":"Chlorophenols"},
-    "2.4.5-trichlorophenol":         {"vs":"SVOCs","grp":"Chlorophenols"},
-    "2,4,5-trichlorophenol":         {"vs":"SVOCs","grp":"Chlorophenols"},
-    "2.4.6-trichlorophenol":         {"vs":"SVOCs","grp":"Chlorophenols"},
-    "2,4,6-trichlorophenol":         {"vs":"SVOCs","grp":"Chlorophenols"},
-    "2.4-dichlorophenol":            {"vs":"SVOCs","grp":"Chlorophenols"},
-    "2,4-dichlorophenol":            {"vs":"SVOCs","grp":"Chlorophenols"},
-    "2.6-dichlorophenol":            {"vs":"SVOCs","grp":"Chlorophenols"},
-    "2,6-dichlorophenol":            {"vs":"SVOCs","grp":"Chlorophenols"},
-    "pentachlorophenol":             {"vs":"SVOCs","grp":"Chlorophenols"},
-    # SVOCs - Nitroaromatic
-    "2.4-dinitrophenol":             {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    "2,4-dinitrophenol":             {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    "2.4-dinitrotoluene":            {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    "2,4-dinitrotoluene":            {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    "2-nitroaniline":                {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    "2-nitrophenol":                 {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    "2.6-dinitrotoluene":            {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    "2,6-dinitrotoluene":            {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    "3-nitroaniline":                {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    "4.6-dinitro-2-methylphenol":    {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    "4,6-dinitro-2-methylphenol":    {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    "4-nitroaniline":                {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    "4-nitrophenol":                 {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    "nitrobenzene":                  {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
-    # SVOCs - Chlorinated Hydrocarbons
-    "bis(2-chloroethoxy)methane":    {"vs":"SVOCs","grp":"Chlorinated Hydrocarbons"},
-    "bis(2-chloroethyl)ether":       {"vs":"SVOCs","grp":"Chlorinated Hydrocarbons"},
-    "bis(2-chloroisopropyl)ether":   {"vs":"SVOCs","grp":"Chlorinated Hydrocarbons"},
-    # SVOCs - Nitrosoamines
-    "n-nitrosodi-n-propylamine":     {"vs":"SVOCs","grp":"Nitrosoamines"},
-    # SVOCs - Pesticides
-    "dinoseb":                       {"vs":"SVOCs","grp":"Pesticides"},
-    # SVOCs - Phthalates
-    "bis(2-ethylhexyl)phthalate":    {"vs":"SVOCs","grp":"Phthalates"},
-    "butyl benzyl phthalate":        {"vs":"SVOCs","grp":"Phthalates"},
-    "di-n-butyl phthalate":          {"vs":"SVOCs","grp":"Phthalates"},
-    "di-n-octyl phthalate":          {"vs":"SVOCs","grp":"Phthalates"},
-    "diethyl phthalate":             {"vs":"SVOCs","grp":"Phthalates"},
-    "dimethyl phthalate":            {"vs":"SVOCs","grp":"Phthalates"},
-}
-
-# VOC group order for display (bottom to top = higher depth first in output)
-VOC_GROUP_ORDER = [
-    ("VOCs",  "Non-Halogenated VOCs"),
-    ("VOCs",  "BTEX"),
-    ("VOCs",  "Halogenated VOCs"),
-    ("SVOCs", "Phenols & Naphtols"),
-    ("SVOCs", "PAHs"),
-    ("SVOCs", "Anilines"),
-    ("SVOCs", "Aromatic Compounds"),
-    ("SVOCs", "Alcohols"),
-    ("SVOCs", "Aldehydes / Ketones"),
-    ("SVOCs", "Chlorophenols"),
-    ("SVOCs", "Nitroaromatic Compounds"),
-    ("SVOCs", "Chlorinated Hydrocarbons"),
-    ("SVOCs", "Nitrosoamines"),
-    ("SVOCs", "Pesticides"),
-    ("SVOCs", "Phthalates"),
+# ── VOC/SVOC COMPOUND MAP - exact order from reference file ──────────────────
+# List of (voc_svoc, group, compound_name) in exact display order
+VOC_COMPOUND_ORDER = [
+    # VOCs - Non-Halogenated VOCs (10)
+    ("VOCs", "Non-Halogenated VOCs", "1.2.4-Trimethylbenzene"),
+    ("VOCs", "Non-Halogenated VOCs", "1.3.5-Trimethylbenzene"),
+    ("VOCs", "Non-Halogenated VOCs", "MTBE"),
+    ("VOCs", "Non-Halogenated VOCs", "Styrene"),
+    ("VOCs", "Non-Halogenated VOCs", "n-Butylbenzene"),
+    ("VOCs", "Non-Halogenated VOCs", "n-Propylbenzene"),
+    ("VOCs", "Non-Halogenated VOCs", "Isopropylbenzene"),
+    ("VOCs", "Non-Halogenated VOCs", "Acetone"),
+    ("VOCs", "Non-Halogenated VOCs", "2-Butanone (MEK)"),
+    ("VOCs", "Non-Halogenated VOCs", "1.4-Dioxane"),
+    # VOCs - BTEX (4)
+    ("VOCs", "BTEX", "Benzene"),
+    ("VOCs", "BTEX", "Toluene"),
+    ("VOCs", "BTEX", "Ethylbenzene"),
+    ("VOCs", "BTEX", "Sum of Xylenes"),
+    # VOCs - Halogenated VOCs (16)
+    ("VOCs", "Halogenated VOCs", "1.1-Dichloroethane"),
+    ("VOCs", "Halogenated VOCs", "1.1-Dichloroethene"),
+    ("VOCs", "Halogenated VOCs", "1.2-Dichloroethane"),
+    ("VOCs", "Halogenated VOCs", "1.2-Dichloropropane"),
+    ("VOCs", "Halogenated VOCs", "Chlorobenzene"),
+    ("VOCs", "Halogenated VOCs", "Chloroform"),
+    ("VOCs", "Halogenated VOCs", "Dichloromethane"),
+    ("VOCs", "Halogenated VOCs", "Tetrachloroethene"),
+    ("VOCs", "Halogenated VOCs", "Tetrachloromethane"),
+    ("VOCs", "Halogenated VOCs", "Trichloroethene"),
+    ("VOCs", "Halogenated VOCs", "Vinyl chloride"),
+    ("VOCs", "Halogenated VOCs", "cis-1.2-Dichloroethene"),
+    ("VOCs", "Halogenated VOCs", "trans-1.2-Dichloroethene"),
+    ("VOCs", "Halogenated VOCs", "1.4-Dichlorobenzene"),
+    ("VOCs", "Halogenated VOCs", "1.2-Dichlorobenzene"),
+    ("VOCs", "Halogenated VOCs", "1.3-Dichlorobenzene"),
+    # SVOCs - Phenols & Naphtols (5)
+    ("SVOCs", "Phenols & Naphtols", "2.4-Dimethylphenol"),
+    ("SVOCs", "Phenols & Naphtols", "2-Methylphenol"),
+    ("SVOCs", "Phenols & Naphtols", "3 & 4-Methylphenol"),
+    ("SVOCs", "Phenols & Naphtols", "4-Chloro-3-methylphenol"),
+    ("SVOCs", "Phenols & Naphtols", "Phenol"),
+    # SVOCs - PAHs (16)
+    ("SVOCs", "PAHs", "Acenaphthene"),
+    ("SVOCs", "PAHs", "Acenaphthylene"),
+    ("SVOCs", "PAHs", "Anthracene"),
+    ("SVOCs", "PAHs", "Benz(a)anthracene"),
+    ("SVOCs", "PAHs", "Benzo(a)pyrene"),
+    ("SVOCs", "PAHs", "Benzo(b)fluoranthene"),
+    ("SVOCs", "PAHs", "Benzo(g.h.i)perylene"),
+    ("SVOCs", "PAHs", "Benzo(k)fluoranthene"),
+    ("SVOCs", "PAHs", "Chrysene"),
+    ("SVOCs", "PAHs", "Dibenz(a.h)anthracene"),
+    ("SVOCs", "PAHs", "Fluoranthene"),
+    ("SVOCs", "PAHs", "Fluorene"),
+    ("SVOCs", "PAHs", "Indeno(1.2.3.cd)pyrene"),
+    ("SVOCs", "PAHs", "Naphthalene"),
+    ("SVOCs", "PAHs", "Phenanthrene"),
+    ("SVOCs", "PAHs", "Pyrene"),
+    # SVOCs - Anilines (4)
+    ("SVOCs", "Anilines", "4-Chloroaniline"),
+    ("SVOCs", "Anilines", "Aniline"),
+    ("SVOCs", "Anilines", "Benzidine"),
+    ("SVOCs", "Anilines", "Diphenylamine"),
+    # SVOCs - Aromatic Compounds (8)
+    ("SVOCs", "Aromatic Compounds", "1,1'-Biphenyl"),
+    ("SVOCs", "Aromatic Compounds", "1-Chloronaphthalene"),
+    ("SVOCs", "Aromatic Compounds", "2-Chloronaphthalene"),
+    ("SVOCs", "Aromatic Compounds", "2-Methylnaphthalene"),
+    ("SVOCs", "Aromatic Compounds", "4-Bromophenyl phenyl ether"),
+    ("SVOCs", "Aromatic Compounds", "4-Chlorophenyl phenyl ether"),
+    ("SVOCs", "Aromatic Compounds", "Carbazole"),
+    ("SVOCs", "Aromatic Compounds", "Dibenzofuran"),
+    # SVOCs - Alcohols (1)
+    ("SVOCs", "Alcohols", "Benzyl Alcohol"),
+    # SVOCs - Aldehydes / Ketones (3)
+    ("SVOCs", "Aldehydes / Ketones", "6-Caprolactam"),
+    ("SVOCs", "Aldehydes / Ketones", "Acetophenone"),
+    ("SVOCs", "Aldehydes / Ketones", "Isophorone"),
+    # SVOCs - Chlorophenols (6)
+    ("SVOCs", "Chlorophenols", "2-Chlorophenol"),
+    ("SVOCs", "Chlorophenols", "2.4.5-Trichlorophenol"),
+    ("SVOCs", "Chlorophenols", "2.4.6-Trichlorophenol"),
+    ("SVOCs", "Chlorophenols", "2.4-Dichlorophenol"),
+    ("SVOCs", "Chlorophenols", "2.6-Dichlorophenol"),
+    ("SVOCs", "Chlorophenols", "Pentachlorophenol"),
+    # SVOCs - Nitroaromatic Compounds (10)
+    ("SVOCs", "Nitroaromatic Compounds", "2.4-Dinitrophenol"),
+    ("SVOCs", "Nitroaromatic Compounds", "2.4-Dinitrotoluene"),
+    ("SVOCs", "Nitroaromatic Compounds", "2-Nitroaniline"),
+    ("SVOCs", "Nitroaromatic Compounds", "2-Nitrophenol"),
+    ("SVOCs", "Nitroaromatic Compounds", "2.6-Dinitrotoluene"),
+    ("SVOCs", "Nitroaromatic Compounds", "3-Nitroaniline"),
+    ("SVOCs", "Nitroaromatic Compounds", "4.6-Dinitro-2-methylphenol"),
+    ("SVOCs", "Nitroaromatic Compounds", "4-Nitroaniline"),
+    ("SVOCs", "Nitroaromatic Compounds", "4-Nitrophenol"),
+    ("SVOCs", "Nitroaromatic Compounds", "Nitrobenzene"),
+    # SVOCs - Chlorinated Hydrocarbons (3)
+    ("SVOCs", "Chlorinated Hydrocarbons", "Bis(2-chloroethoxy)methane"),
+    ("SVOCs", "Chlorinated Hydrocarbons", "Bis(2-chloroethyl)ether"),
+    ("SVOCs", "Chlorinated Hydrocarbons", "Bis(2-chloroisopropyl)ether"),
+    # SVOCs - Nitrosoamines (1)
+    ("SVOCs", "Nitrosoamines", "N-Nitrosodi-n-propylamine"),
+    # SVOCs - Pesticides (1)
+    ("SVOCs", "Pesticides", "Dinoseb"),
+    # SVOCs - Phthalates (6)
+    ("SVOCs", "Phthalates", "Bis(2-ethylhexyl)phthalate"),
+    ("SVOCs", "Phthalates", "Butyl benzyl phthalate"),
+    ("SVOCs", "Phthalates", "Di-n-butyl phthalate"),
+    ("SVOCs", "Phthalates", "Di-n-octyl phthalate"),
+    ("SVOCs", "Phthalates", "Diethyl phthalate"),
+    ("SVOCs", "Phthalates", "Dimethyl phthalate"),
 ]
+
+# lookup: norm(compound) -> (voc_svoc, group)
+VOC_MAP = {v.lower(): {"vs": vs, "grp": grp} for vs,grp,v in VOC_COMPOUND_ORDER}
+# also add comma variants (1,2 vs 1.2)
+for vs,grp,v in VOC_COMPOUND_ORDER:
+    VOC_MAP[v.lower().replace(".",",")] = {"vs": vs, "grp": grp}
 
 # ── PFAS ALIAS ────────────────────────────────────────────────────────────────
 PFAS_ALIAS = {
@@ -563,6 +523,203 @@ def write_metals_sheet(ws, df, thresh_dict, t1col, t1lbl):
     ws.column_dimensions["A"].width=14; ws.column_dimensions["B"].width=10
     for ci in range(3,len(metals)+3): ws.column_dimensions[get_column_letter(ci)].width=11
     ws.freeze_panes="C6"
+
+# ── PFAS SHEET ────────────────────────────────────────────────────────────────
+def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
+    df=df.copy()
+    samples=sorted(df["sample_id"].unique(),key=sort_key)
+    sdepth={}
+    for _,r in df.iterrows():
+        if r["sample_id"] not in sdepth: sdepth[r["sample_id"]]=r["depth"]
+
+    # build (sample_id, depth) pairs sorted sample ASC depth DESC
+    pairs_pfas = sorted(
+        df[["sample_id","depth"]].drop_duplicates().values.tolist(),
+        key=lambda x: (sort_key(x[0]), -(x[1] or 0))
+    )
+
+    def to_ug(v):
+        if v is None: return None
+        try: return round(float(v)*1000, 6)
+        except: return v
+
+    # Cols A-E: שם התרכובת, CAS, VSL, TIER1, יחידות — merge rows 1+2
+    # Col F: LOR (not merged)
+    # Col G: שם קידוח row1, עומק row2 (not merged)
+    # Col H+: samples
+    fixed_hdrs = ["שם התרכובת","CAS","VSL [µg/kg]",f"{t1lbl} [µg/kg]","יחידות"]
+    for ci,h in enumerate(fixed_hdrs,1):
+        style_hdr(ws.cell(1,ci,h), HDR_BLUE_FILL)
+        ws.merge_cells(start_row=1,start_column=ci,end_row=2,end_column=ci)
+        ws.cell(1,ci).alignment=Alignment(horizontal="center",vertical="center",wrap_text=True)
+        ws.cell(1,ci).fill=HDR_BLUE_FILL; ws.cell(1,ci).border=thin_border()
+    style_hdr(ws.cell(1,6,"LOR"),        HDR_BLUE_FILL)
+    style_hdr(ws.cell(2,6,"[µg/kg]"),    HDR_BLUE_FILL)
+    style_hdr(ws.cell(1,7,"שם קידוח"),   HDR_BLUE_FILL)
+    style_hdr(ws.cell(2,7,"עומק"),       HDR_BLUE_FILL)
+
+    # sample headers: merge row1 for same sid across depths
+    prev_sid=None; sid_merge_start_p={}
+    for ci,(sid,depth) in enumerate(pairs_pfas,8):
+        sid_val = sid if sid!=prev_sid else None
+        style_hdr(ws.cell(1,ci,sid_val), HDR_BLUE_FILL)
+        style_hdr(ws.cell(2,ci,depth),   HDR_BLUE_FILL)
+        if sid!=prev_sid: sid_merge_start_p[sid]=ci
+        prev_sid=sid
+    for sid, start_ci in sid_merge_start_p.items():
+        cols_p = [ci for ci,(s,_) in enumerate(pairs_pfas,8) if s==sid]
+        if len(cols_p)>1:
+            ws.merge_cells(start_row=1,start_column=start_ci,end_row=1,end_column=cols_p[-1])
+            ws.cell(1,start_ci).alignment=Alignment(horizontal="center",vertical="center")
+            ws.cell(1,start_ci).fill=HDR_BLUE_FILL; ws.cell(1,start_ci).border=thin_border()
+
+    for row_i,cmp in enumerate(df["compound"].unique(),3):
+        df_c=df[df["compound"]==cmp]
+        vsl_mg,tier1_mg,cas=get_thresh(cmp,thresh_dict,t1col)
+        vsl=to_ug(vsl_mg); tier1=to_ug(tier1_mg)
+        unit=df_c.iloc[0]["unit"] if not df_c.empty else "µg/kg"
+        lor=df_c.iloc[0]["lor"]  if not df_c.empty else ""
+        # col E+F merged = LOR value
+        for ci,val in enumerate([cmp,cas,vsl,tier1,unit],1): style_data(ws.cell(row_i,ci,val))
+        ws.merge_cells(start_row=row_i,start_column=6,end_row=row_i,end_column=6)
+        style_data(ws.cell(row_i,6,lor))
+        style_data(ws.cell(row_i,7,None))
+        for ci,(sid,depth) in enumerate(pairs_pfas,8):
+            sub=df_c[(df_c["sample_id"]==sid)&(df_c["depth"]==depth)]
+            rs=sub.iloc[0]["result_str"] if not sub.empty else ""
+            style_data(ws.cell(row_i,ci,rs), check_exceed(rs,vsl,tier1))
+
+    ws.column_dimensions["A"].width=50
+    for ci in range(2,8): ws.column_dimensions[get_column_letter(ci)].width=13
+    for ci in range(8, 8+len(pairs_pfas)): ws.column_dimensions[get_column_letter(ci)].width=12
+    ws.freeze_panes="H3"
+
+# ── VOC SHEET ─────────────────────────────────────────────────────────────────
+def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
+    df = df.copy()
+
+    # (sample_id, depth) pairs: sample ASC, depth DESC (shallow last = bottom of column)
+    pairs = sorted(
+        df[["sample_id","depth"]].drop_duplicates().values.tolist(),
+        key=lambda x: (sort_key(x[0]), -(x[1] or 0))
+    )
+
+    # ── HEADERS row 1-2 ──────────────────────────────────────────────────────
+    fixed = ["קבוצה", "קבוצה", "שם התרכובת", "CAS", "VSL", t1lbl, "יחידות", "שם קידוח"]
+    for ci, h in enumerate(fixed, 1):
+        style_hdr(ws.cell(1, ci, h), HDR_BLUE_FILL, sz=9)
+    # merge rows 1-2 for cols A-G
+    for ci in range(1, 8):
+        ws.merge_cells(start_row=1, start_column=ci, end_row=2, end_column=ci)
+        c = ws.cell(1, ci)
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.fill = HDR_BLUE_FILL; c.border = thin_border()
+    # col H: not merged
+    style_hdr(ws.cell(2, 8, "עומק"), HDR_BLUE_FILL, sz=9)
+
+    # sample columns
+    prev_sid = None; sid_col_start = {}
+    for ci, (sid, depth) in enumerate(pairs, 9):
+        sid_val = sid if sid != prev_sid else None
+        style_hdr(ws.cell(1, ci, sid_val), HDR_BLUE_FILL, sz=9)
+        style_hdr(ws.cell(2, ci, depth),   HDR_BLUE_FILL, sz=9)
+        if sid != prev_sid: sid_col_start[sid] = ci
+        prev_sid = sid
+    # merge row-1 sample name across depth columns
+    for sid, sc in sid_col_start.items():
+        cols = [ci for ci, (s, _) in enumerate(pairs, 9) if s == sid]
+        if len(cols) > 1:
+            ws.merge_cells(start_row=1, start_column=sc, end_row=1, end_column=cols[-1])
+            c = ws.cell(1, sc)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.fill = HDR_BLUE_FILL; c.border = thin_border()
+
+    # ── BUILD ALS lookup: norm(compound) -> result per (sid,depth) ──────────
+    als_data = {}  # norm(cmp) -> {(sid,depth): result_str}
+    for _, r in df.iterrows():
+        k = norm(r["compound"])
+        if k not in als_data: als_data[k] = {}
+        als_data[k][(r["sample_id"], r["depth"])] = r["result_str"]
+
+    # also map with dot<->comma variants
+    als_keys_extra = {}
+    for k, v in als_data.items():
+        alt = k.replace(".", ",")
+        if alt not in als_data: als_keys_extra[alt] = v
+        alt2 = k.replace(",", ".")
+        if alt2 not in als_data: als_keys_extra[alt2] = v
+    als_data.update(als_keys_extra)
+
+    # ── WRITE DATA ROWS ───────────────────────────────────────────────────────
+    data_start_row = 3
+    row_i = data_start_row
+
+    # track merge ranges for col A and col B
+    vs_ranges  = {}  # vs  -> [first_row, last_row]
+    grp_ranges = {}  # grp -> [first_row, last_row]
+
+    for vs, grp, cmp in VOC_COMPOUND_ORDER:
+        vsl, tier1, cas = get_thresh(cmp, thresh_dict, t1col)
+        unit = "mg/kg"
+
+        # find ALS data
+        cmp_key = norm(cmp)
+        cmp_key2 = cmp_key.replace(".", ",")
+        cmp_data = als_data.get(cmp_key) or als_data.get(cmp_key2) or {}
+
+        # col A: vs (blank if same as previous row - merge later)
+        style_data(ws.cell(row_i, 1, vs),   sz=9)
+        style_data(ws.cell(row_i, 2, grp),  sz=9)
+        style_data(ws.cell(row_i, 3, cmp),  sz=9)
+        style_data(ws.cell(row_i, 4, cas),  sz=9)
+        style_data(ws.cell(row_i, 5, vsl),  sz=9)
+        style_data(ws.cell(row_i, 6, tier1),sz=9)
+        style_data(ws.cell(row_i, 7, unit), sz=9)
+        style_data(ws.cell(row_i, 8, None), sz=9)
+
+        for ci, (sid, depth) in enumerate(pairs, 9):
+            rs = cmp_data.get((sid, depth), "")
+            style_data(ws.cell(row_i, ci, rs), check_exceed(rs, vsl, tier1), sz=9)
+
+        # track ranges for merging
+        if vs not in vs_ranges:   vs_ranges[vs]   = [row_i, row_i]
+        else:                      vs_ranges[vs][1]  = row_i
+        grp_key = (vs, grp)
+        if grp_key not in grp_ranges: grp_ranges[grp_key] = [row_i, row_i]
+        else:                          grp_ranges[grp_key][1] = row_i
+
+        row_i += 1
+
+    # ── MERGE col A (VOCs / SVOCs) ────────────────────────────────────────────
+    for vs, (r1, r2) in vs_ranges.items():
+        if r2 > r1:
+            ws.merge_cells(start_row=r1, start_column=1, end_row=r2, end_column=1)
+        c = ws.cell(r1, 1)
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = thin_border()
+
+    # ── MERGE col B (groups) ─────────────────────────────────────────────────
+    for (vs, grp), (r1, r2) in grp_ranges.items():
+        if r2 > r1:
+            ws.merge_cells(start_row=r1, start_column=2, end_row=r2, end_column=2)
+        c = ws.cell(r1, 2)
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = thin_border()
+
+    # ── COLUMN WIDTHS ─────────────────────────────────────────────────────────
+    ws.column_dimensions["A"].width = 8
+    ws.column_dimensions["B"].width = 22
+    ws.column_dimensions["C"].width = 35
+    ws.column_dimensions["D"].width = 12
+    ws.column_dimensions["E"].width = 10
+    ws.column_dimensions["F"].width = 12
+    ws.column_dimensions["G"].width = 9
+    ws.column_dimensions["H"].width = 12
+    for ci in range(9, 9 + len(pairs)):
+        ws.column_dimensions[get_column_letter(ci)].width = 10
+    ws.row_dimensions[1].height = 20
+    ws.row_dimensions[2].height = 15
+    ws.freeze_panes = "I3"
 
 # ── PFAS SHEET ────────────────────────────────────────────────────────────────
 def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
