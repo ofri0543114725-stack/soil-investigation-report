@@ -9,7 +9,7 @@ import re
 # ── BASIC PAGE SETUP ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="דוח סקר קרקע", layout="wide", page_icon="🧪")
 st.title("🧪 מערכת עיבוד תוצאות מעבדה")
-st.caption("v3.2 - Improved threshold matching & VOC depth label")
+st.caption("v3.3 - Canonical threshold matching (numbers before/after name)")
 st.markdown("---")
 
 # ── STYLES ───────────────────────────────────────────────────────────────────────
@@ -354,9 +354,10 @@ CANONICAL_KEY = "__CANONICAL_MAP_INTERNAL__"
 
 def canonical_compound(name: str) -> str:
     """
-    Canonical form to match threshold names and ALS names even when:
-    - המספרים לפני/אחרי השם (1,2,4-trimethylbenzene vs trimethylbenzene, 1,2,4)
-    - ethene / ethen / ethylene שונים
+    צורה קנונית:
+    - מאחד ethene / ethylene / ethen.
+    - מאחד מצבים שבהם המספרים לפני/אחרי השם (1.2.4‑Trimethylbenzene
+      לעומת Trimethylbenzene, 1,2,4‑).
     """
     s = norm(name)
 
@@ -364,27 +365,18 @@ def canonical_compound(name: str) -> str:
     s = s.replace("ethylene", "ethen")
     s = s.replace("ethene", "ethen")
 
-    # remove brackets content at end for canonical (already handled elsewhere גם)
+    # הורדת סוגריים בסוף
     s = re.sub(r"\s*\([^)]+\)\s*$", "", s)
 
-    # replace - and / with spaces for tokenization
-    s = s.replace("-", " ").replace("/", " ")
+    # digits sequence (אוספים את כל המספרים לפי סדר הופעה)
+    nums = re.findall(r"\d+", s)
+    num_part = ",".join(nums) if nums else ""
 
-    tokens = re.split(r"\s+", s)
-    num_tokens = []
-    word_tokens = []
-    for t in tokens:
-        t = t.strip(",;")
-        if not t:
-            continue
-        if re.search(r"\d", t):
-            num_tokens.append(t)
-        else:
-            word_tokens.append(t)
+    # מסירים ספרות וסימני הפרדה מהשם ובלבד שנשארו רק מילים
+    base_no_nums = re.sub(r"[0-9.,/\-]", " ", s)
+    base_no_nums = re.sub(r"\s+", " ", base_no_nums).strip()
+    word_part = base_no_nums
 
-    # sort numeric & word parts so "1,2,4 trimethylbenzene" == "trimethylbenzene 1,2,4"
-    num_part  = ",".join(sorted(num_tokens)) if num_tokens else ""
-    word_part = " ".join(word_tokens)
     canon = (num_part + " " + word_part).strip()
     return canon
 
@@ -392,15 +384,13 @@ def canonical_compound(name: str) -> str:
 def match_threshold(compound_name, thresh_dict):
     """
     Match compound name from ALS/VOC list to threshold table.
-    חיזוק התאמה:
-    - נקודות/פסיקים (1.2.4 ↔ 1,2,4)
-    - אליאסים של PFAS
+    כולל:
+    - נקודות/פסיקים
+    - alias של PFAS
     - הסרת סוגריים
-    - צורה קנונית (מספרים לפני/אחרי + ethene/ethylene)
+    - התאמת צורה קנונית (מספרים+שם)
     """
     key = norm(compound_name)
-
-    # 0. canonical map (נבנה פעם אחת ב-load_threshold_file)
     canon_map = thresh_dict.get(CANONICAL_KEY)
 
     # 1. ניסיון ישיר + וריאציות נקודה/פסיק
@@ -409,7 +399,7 @@ def match_threshold(compound_name, thresh_dict):
         if k in thresh_dict and k != CANONICAL_KEY:
             return thresh_dict[k]
 
-    # 2. PFAS alias – כולל גם פה נקודה/פסיק
+    # 2. PFAS alias
     aliased = PFAS_ALIAS.get(key)
     if aliased:
         a_key = norm(aliased)
@@ -417,7 +407,7 @@ def match_threshold(compound_name, thresh_dict):
             if k in thresh_dict and k != CANONICAL_KEY:
                 return thresh_dict[k]
 
-    # 3. הורדת סוגריים בסוף (כבר נעשה בקאנון, אבל גם פה לשם ביטחון)
+    # 3. הורדת סוגריים בסוף
     stripped = re.sub(r"\s*\([A-Z0-9:_\-]+\)\s*$", "",
                       compound_name).strip().lower()
     for k, v in thresh_dict.items():
@@ -427,7 +417,7 @@ def match_threshold(compound_name, thresh_dict):
         if len(stripped) > 8 and stripped == k_s:
             return v
 
-    # 4. canonical compound name (מטפל 1,2,4 לפני/אחרי, ethene/ethylene וכו')
+    # 4. canonical name
     if canon_map:
         ck = canonical_compound(compound_name)
         hit = canon_map.get(ck)
@@ -464,7 +454,7 @@ def load_threshold_file(file_bytes):
             "Res_B":     g(13),
         }
 
-    # build canonical map once
+    # canonical map
     canon_map = {}
     for k, v in thresh.items():
         ck = canonical_compound(k)
@@ -644,7 +634,6 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
     vsl_tot = min(vv) if vv else 350
     t1_tot  = min(tt) if tt else 350
 
-    # Header row 1 (no col C)
     for ci, h in enumerate(["שם קידוח", "עומק",
                             "TPH DRO", "TPH ORO", "Total TPH"], 1):
         style_hdr(ws.cell(1, ci, h), HDR_BLUE_FILL)
@@ -669,7 +658,6 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
         for ci in [3, 4, 5]:
             style_hdr(ws.cell(ri, ci, sub_vals[lbl]), HDR_BLUE_FILL)
 
-    # pivot — one row per (sample_id, depth)
     pivoted = {}
     for _, r in df.iterrows():
         k = (r["sample_id"], r["depth"])
@@ -912,7 +900,7 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
     ws.freeze_panes = "H3"
 
 
-# ── VOC+SVOC SHEET (לפי טמפלט ייחוס) ───────────────────────────────────────────
+# ── VOC+SVOC SHEET ───────────────────────────────────────────────────────────────
 def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
     df = df.copy()
 
@@ -921,9 +909,6 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
         key=lambda x: (sort_key(x[0]), -(x[1] or 0))
     )
 
-    # ── HEADERS (rows 1–2) ────────────────────────────────────────────────────
-    # A=קבוצה, B=קבוצה, C=שם התרכובת, D=CAS, E=VSL, F=TIER 1 + depth,
-    # G:H=יחידות, I=שם קידוח/עומק
     for ci, h in enumerate(
         ["קבוצה", "קבוצה", "שם התרכובת", "CAS", "VSL", f"TIER 1\n{depth}"], 1
     ):
@@ -939,7 +924,6 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
     style_hdr(ws.cell(1, 9, "שם קידוח"), HDR_BLUE_FILL, sz=9)
     style_hdr(ws.cell(2, 9, "עומק"),      HDR_BLUE_FILL, sz=9)
 
-    # sample columns from col 10
     prev_sid      = None
     sid_col_start = {}
     for ci, (sid, depth_val) in enumerate(pairs, 10):
@@ -961,7 +945,6 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
             c.fill   = HDR_BLUE_FILL
             c.border = thin_border()
 
-    # ALS lookup: norm(compound) -> {(sid,depth): result_str}
     als_data = {}
     for _, r in df.iterrows():
         k = norm(r["compound"])
@@ -972,7 +955,6 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
             if alt not in als_data:
                 als_data[alt] = als_data[k]
 
-    # ── DATA ROWS: exact VOC_COMPOUND_ORDER ──────────────────────────────────
     for row_i, (vs, grp, cmp) in enumerate(VOC_COMPOUND_ORDER, 3):
         vsl, tier1, cas = get_thresh(cmp, thresh_dict, t1col)
         cmp_key = norm(cmp)
@@ -998,7 +980,6 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
                        check_exceed(rs, vsl, tier1),
                        sz=9)
 
-    # ── MERGE col A: VOCs / SVOCs ─────────────────────────────────────────────
     for r1, r2, val in [(3, 32, "VOCs"), (33, 96, "SVOCs")]:
         ws.merge_cells(start_row=r1, start_column=1,
                        end_row=r2, end_column=1)
@@ -1009,7 +990,6 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
                                 wrap_text=True)
         c.border = thin_border()
 
-    # ── MERGE col B: exact ranges from reference template ────────────────────
     b_ranges = [
         (3, 12,  "Non-Halogenated VOCs"),
         (13, 16, "BTEX"),
@@ -1054,46 +1034,35 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
     ws.freeze_panes = "J3"
 
 
-# ── SIDEBAR: TIER1 SETTINGS ─────────────────────────────────────────────────────
+# ── SIDEBAR & MAIN FLOW ─────────────────────────────────────────────────────────
 st.sidebar.header("⚙️ הגדרות ערכי סף")
 st.sidebar.markdown("🟡 חריגה מ-VSL &nbsp;&nbsp;&nbsp; 🟠 חריגה מ-TIER 1")
 st.sidebar.markdown("---")
 
-land_use = st.sidebar.selectbox(
-    "Land Use",
-    ["Industrial", "Residential"],
-    index=0
-)
-aquifer = st.sidebar.selectbox(
-    "Aquifer Sensitivity",
-    ["A-1, A, B", "B-1 or C"],
-    index=0
-)
+land_use = st.sidebar.selectbox("Land Use",
+                                ["Industrial", "Residential"], index=0)
+aquifer = st.sidebar.selectbox("Aquifer Sensitivity",
+                               ["A-1, A, B", "B-1 or C"], index=0)
 depth_opts = ["Not Applicable"] if "b-1" in aquifer.lower() \
     else ["0 - 6 m", ">6 m"]
-depth   = st.sidebar.selectbox("Depth to Groundwater", depth_opts, index=0)
+depth   = st.sidebar.selectbox("Depth to Groundwater",
+                               depth_opts, index=0)
 
 t1col = get_tier1_col(land_use, aquifer, depth)
 t1lbl = tier1_label(land_use, aquifer, depth)
 st.sidebar.info(f"TIER 1: **{land_use}** | {aquifer} | {depth}")
 
-# ── FILE UPLOADS ────────────────────────────────────────────────────────────────
 c1, c2 = st.columns(2)
 with c1:
     st.subheader("📁 קובץ ערכי סף")
-    thr_file = st.file_uploader(
-        "העלה קובץ ערכי הסף המאוחד",
-        type=["xlsx", "xls"],
-        key="thr"
-    )
+    thr_file = st.file_uploader("העלה קובץ ערכי הסף המאוחד",
+                                type=["xlsx", "xls"], key="thr")
 with c2:
     st.subheader("📂 קבצי ALS")
-    data_files = st.file_uploader(
-        "העלה קבצי ALS",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True,
-        key="data"
-    )
+    data_files = st.file_uploader("העלה קבצי ALS",
+                                  type=["xlsx", "xls"],
+                                  accept_multiple_files=True,
+                                  key="data")
 
 if not thr_file:
     st.info("👆 העלה קובץ ערכי סף וקבצי ALS")
@@ -1103,13 +1072,11 @@ if not data_files:
     st.warning("⚠️ העלה קבצי ALS")
     st.stop()
 
-# ── LOAD THRESHOLDS ─────────────────────────────────────────────────────────────
 thresh_dict = load_threshold_file(thr_file.read())
 st.success(
-    f"✅ {len(thresh_dict) - 1} ערכי סף (לא כולל מפת קנון) | {land_use} | {aquifer} | {depth}"
+    f"✅ {len(thresh_dict) - 1} ערכי סף (לא כולל מפת קאנון) | {land_use} | {aquifer} | {depth}"
 )
 
-# ── LOAD ALS FILES ──────────────────────────────────────────────────────────────
 all_data = []
 for f in data_files:
     df, err = parse_als_file(f.read(), f.name)
@@ -1130,14 +1097,12 @@ with st.expander(f"👁️ תצוגה מקדימה ({len(df_all)} שורות)"):
 with st.expander("קבוצות שנמצאו"):
     st.write(df_all["group"].unique().tolist())
 
-# ── CLASSIFY GROUPS ─────────────────────────────────────────────────────────────
 def dg(kw):
     return df_all[df_all["group"].str.contains(
         "|".join(kw),
         case=False,
         na=False
     )]
-
 
 tph_df    = dg(["petroleum", "tph", "hydrocarbon"])
 metals_df = dg(["metal", "cation", "extractable"])
@@ -1148,111 +1113,35 @@ voc_df    = dg([
     "nitro", "phthalate", "pesticide", "pcb", "other"
 ])
 
-# ── OPTIONAL DEBUG TPH ─────────────────────────────────────────────────────────
 if not tph_df.empty:
-    def _dbg_tph(df):
-        def _dro(c):
-            if "(dro)" in c or "- dro" in c or c.strip() == "dro":
-                return True
-            if "(oro)" in c or "- oro" in c:
-                return False
-            return "c10" in c and "c28" in c and "c40" not in c
+    st.info(f"✅ TPH: {tph_df['sample_id'].nunique()} קידוחים")
+if not metals_df.empty:
+    st.info(f"✅ Metals: {metals_df['sample_id'].nunique()} קידוחים")
+if not voc_df.empty:
+    st.info(f"✅ VOC+SVOC: {voc_df['sample_id'].nunique()} קידוחים")
+if not pfas_df.empty:
+    st.info(f"✅ PFAS: {pfas_df['sample_id'].nunique()} קידוחים")
 
-        def _oro(c):
-            if "(oro)" in c or "- oro" in c or c.strip() == "oro":
-                return True
-            if "(dro)" in c or "- dro" in c:
-                return False
-            return (("c24" in c and "c40" in c) or
-                    ("c28" in c and "c40" in c))
-
-        def _tot(c):
-            if any(x in c for x in ["(dro)", "(oro)", "- dro", "- oro"]):
-                return False
-            return (("c10" in c and "c40" in c) or
-                    ("total" in c and "tph" in c))
-
-        pv = {}
-        for _, r in df.iterrows():
-            k = (r["sample_id"], r["depth"])
-            if k not in pv:
-                pv[k] = {
-                    "DRO": "", "ORO": "", "TOT": "",
-                    "DRO_f": None, "ORO_f": None,
-                    "DRO_lor": None, "ORO_lor": None,
-                }
-            c = r["compound_lower"]
-            if _dro(c) and not pv[k]["DRO"]:
-                pv[k]["DRO"]     = r["result_str"]
-                pv[k]["DRO_f"]   = r["result"]
-                pv[k]["DRO_lor"] = r.get("lor_val")
-            elif _oro(c) and not pv[k]["ORO"]:
-                pv[k]["ORO"]     = r["result_str"]
-                pv[k]["ORO_f"]   = r["result"]
-                pv[k]["ORO_lor"] = r.get("lor_val")
-            elif _tot(c) and not pv[k]["TOT"]:
-                pv[k]["TOT"]     = r["result_str"]
-
-        out = []
-        for (sid, depth_val), v in sorted(pv.items()):
-            if v["TOT"]:
-                ts = v["TOT"]
-            else:
-                dl = v["DRO"] and str(v["DRO"]).startswith("<")
-                ol = v["ORO"] and str(v["ORO"]).startswith("<")
-                de = not v["DRO"]
-                oe = not v["ORO"]
-                dn = (v["DRO_lor"] if dl and v["DRO_lor"] is not None
-                      else (v["DRO_f"] or 0))
-                on = (v["ORO_lor"] if ol and v["ORO_lor"] is not None
-                      else (v["ORO_f"] or 0))
-                tf = dn + on
-                ts = (f"<{tf:.0f}" if (dl or de) and (ol or oe)
-                      and not (de and oe)
-                      else f"{tf:.0f}")
-            out.append({
-                "Sample":    sid,
-                "Depth":     depth_val,
-                "DRO":       v["DRO"],
-                "ORO":       v["ORO"],
-                "Total":     ts,
-                "DRO_lor":   v["DRO_lor"],
-                "ORO_lor":   v["ORO_lor"],
-            })
-        return pd.DataFrame(out)
-
-    with st.expander("🔍 DEBUG TPH - לחץ לראות חישובים"):
-        st.dataframe(_dbg_tph(tph_df), use_container_width=True)
-
-# ── BUILD OUTPUT WORKBOOK ───────────────────────────────────────────────────────
 wb_out = Workbook()
 wb_out.remove(wb_out.active)
 
 if not tph_df.empty:
     write_tph_sheet(wb_out.create_sheet("TPH"),
                     tph_df, thresh_dict, t1col, t1lbl)
-    st.info(f"✅ TPH: {tph_df['sample_id'].nunique()} קידוחים")
-
 if not metals_df.empty:
     write_metals_sheet(wb_out.create_sheet("Metals"),
                        metals_df, thresh_dict, t1col, t1lbl)
-    st.info(f"✅ Metals: {metals_df['sample_id'].nunique()} קידוחים")
-
 if not voc_df.empty:
     write_voc_sheet(wb_out.create_sheet("VOC+SVOC"),
                     voc_df, thresh_dict, t1col, t1lbl)
-    st.info(f"✅ VOC+SVOC: {voc_df['sample_id'].nunique()} קידוחים")
-
 if not pfas_df.empty:
     write_pfas_sheet(wb_out.create_sheet("PFAS"),
                      pfas_df, thresh_dict, t1col, t1lbl)
-    st.info(f"✅ PFAS: {pfas_df['sample_id'].nunique()} קידוחים")
 
 if not wb_out.sheetnames:
     wb_out.create_sheet("Results")
     st.warning("לא זוהו קבוצות")
 
-# ── DOWNLOAD BUTTON ─────────────────────────────────────────────────────────────
 st.markdown("---")
 buf = io.BytesIO()
 wb_out.save(buf)
