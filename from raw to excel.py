@@ -70,14 +70,4 @@ def strip_abbrev(s):
     cleaned = re.sub(r"\s*\([A-Z0-9:_\-]+\)\s*$", "", str(s)).strip()
     return cleaned.lower()
 
-def match_threshold(compound_name, thresh_dict):
-    """Match compound to threshold entry by name (handles PFAS abbreviations)."""
-    key = norm(compound_name)
-    if key in thresh_dict:
-        return thresh_dict[key]
-    # strip abbreviations from both sides and compare
-    full = strip_abbrev(compound_name)
-    for k, v in thresh_dict.items():
-        if strip_abbrev(k) == full:
-            return v
-        if len(full) > 12 and (full in strip_abbrev(k) or strip
+def match_threshold(compound_name, thresh_dict
