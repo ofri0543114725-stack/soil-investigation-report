@@ -49,10 +49,16 @@ def sort_key(sid):
 def parse_sample(sname):
     sname = str(sname).strip()
     if "DUP" in sname.upper(): return None, None
+    # S85 (0.5) או S1 (1.0)
     m = re.match(r"^(S\d+[A-Za-z0-9]*)\s*\(([0-9.]+)\)", sname)
     if m: return m.group(1), float(m.group(2))
+    # S1-1.0
     m = re.match(r"^(S\d+)-([0-9]+\.?[0-9]*)$", sname)
     if m: return m.group(1), float(m.group(2))
+    # 24.15 (3.0) — שם קידוח מספרי עם נקודה
+    m = re.match(r"^(\d+[\.\d]*)\s*\(([0-9.]+)\)", sname)
+    if m: return m.group(1), float(m.group(2))
+    # שם קידוח בלי עומק — קבל כמות שהוא
     return sname, None
 
 def check_exceed(val_str, vsl, tier1):
