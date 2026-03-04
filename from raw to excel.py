@@ -8,7 +8,7 @@ import re
 
 st.set_page_config(page_title="דוח סקר קרקע", layout="wide", page_icon="🧪")
 st.title("🧪 מערכת עיבוד תוצאות מעבדה")
-st.caption("v3.6 - VOC_ALIAS: 80+ compound name mappings")
+st.caption("v3.7 - Generic parser: auto-detect columns, any format")
 st.markdown("---")
 
 YELLOW_FILL   = PatternFill("solid", fgColor="FFFF00")
@@ -423,32 +423,84 @@ def build_metals_thresh(thresh_dict, t1col):
     return result
 
 def parse_als_file(file_bytes, filename):
+    """
+    Parser גנרי - עובד עם כל קבצי ALS:
+    - מחפש Client Sample ID לפי תוכן (לא לפי מיקום שורה)
+    - מחפש Parameter לפי תוכן
+    - מזהה אוטומטית עמודות Unit, LOR, VSL
+    - עובד עם PFAS / VOC / Metals / TPH באותו קוד
+    """
     try:
         wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
     except Exception as e:
         return None, str(e)
+
     main = next((wb[n] for n in wb.sheetnames if "Client" in n and "SOIL" in n), wb.worksheets[0])
     rows = list(main.iter_rows(values_only=True))
-    sid_idx = next((i for i,r in enumerate(rows) if any("Client Sample ID" in str(v) for v in r if v)), None)
-    if sid_idx is None: return None, "לא נמצאה שורת Sample IDs"
-    col2sample = {ci: str(v).strip() for ci,v in enumerate(rows[sid_idx]) if v and v != "Client Sample ID"}
-    ph_idx = next((i for i,r in enumerate(rows) if r and r[0] == "Parameter"), None)
-    if ph_idx is None: return None, "לא נמצאה שורת Parameter"
-    records = []; group = "Unknown"
-    for row in rows[ph_idx+1:]:
-        p   = row[0] if len(row)>0 else None
-        u   = row[2] if len(row)>2 else None
-        lor = row[3] if len(row)>3 else None
-        if not p: continue
-        if not u and not row[1]: group = str(p).strip(); continue
+
+    # ── מצא שורת Client Sample ID ──────────────────────────────────────────────
+    sid_row_idx = next(
+        (i for i,r in enumerate(rows)
+         if any("Client Sample ID" in str(v) for v in r if v)), None)
+    if sid_row_idx is None:
+        return None, "לא נמצאה שורת Client Sample ID"
+
+    sid_row = rows[sid_row_idx]
+    # מצא את העמודה שמכילה "Client Sample ID"
+    sid_label_col = next(ci for ci,v in enumerate(sid_row) if v and "Client Sample ID" in str(v))
+    # כל העמודות אחריה = שמות הדגימות
+    col2sample = {
+        ci: str(v).strip()
+        for ci,v in enumerate(sid_row)
+        if ci > sid_label_col and v and str(v).strip() not in ("", "None")
+    }
+
+    # ── מצא שורת Parameter ─────────────────────────────────────────────────────
+    ph_idx = next(
+        (i for i,r in enumerate(rows) if r and r[0] == "Parameter"), None)
+    if ph_idx is None:
+        return None, "לא נמצאה שורת Parameter"
+
+    param_row = rows[ph_idx]
+
+    # זהה אוטומטית עמודות Unit ו-LOR לפי כותרת (לא לפי מיקום קשיח)
+    unit_col = next(
+        (ci for ci,v in enumerate(param_row)
+         if v and str(v).strip().lower() == "unit"), 2)
+    lor_col = next(
+        (ci for ci,v in enumerate(param_row)
+         if v and str(v).strip().lower() == "lor"), unit_col + 1)
+
+    # ── קרא נתונים ─────────────────────────────────────────────────────────────
+    records = []
+    group = "Unknown"
+
+    for row in rows[ph_idx + 1:]:
+        p = row[0] if len(row) > 0 else None
+        if not p or str(p).strip() in ("", "None"):
+            continue
+
+        # שורת קבוצה: יש שם אבל אין Method (עמודה 1)
+        method = row[1] if len(row) > 1 else None
+        if not method or str(method).strip() in ("", "None"):
+            group = str(p).strip()
+            continue
+
+        u   = row[unit_col] if unit_col < len(row) else None
+        lor = row[lor_col]  if lor_col  < len(row) else None
+
         for ci, sname in col2sample.items():
             sid, depth_val = parse_sample(sname)
-            if sid is None: continue
+            if sid is None:
+                continue
             val = row[ci] if ci < len(row) else None
             rs  = str(val).strip() if val is not None else ""
+            if rs in ("", "None"):
+                continue
             result = None
-            if rs.startswith("<"): result = 0.0
-            elif rs and rs not in ("None",""):
+            if rs.startswith("<"):
+                result = 0.0
+            else:
                 try: result = float(rs)
                 except: result = None
             if result is not None:
@@ -457,13 +509,21 @@ def parse_als_file(file_bytes, filename):
                     try: lor_val = float(rs[1:].strip())
                     except: lor_val = 0.0
                 records.append({
-                    "sample_id": sid, "depth": depth_val,
-                    "compound": str(p).strip(), "compound_lower": norm(p),
-                    "unit": str(u).strip() if u else "mg/kg",
-                    "lor": lor, "result": result, "result_str": rs,
-                    "lor_val": lor_val, "group": group, "source": filename,
+                    "sample_id":      sid,
+                    "depth":          depth_val,
+                    "compound":       str(p).strip(),
+                    "compound_lower": norm(p),
+                    "unit":           str(u).strip() if u else "mg/kg",
+                    "lor":            lor,
+                    "result":         result,
+                    "result_str":     rs,
+                    "lor_val":        lor_val,
+                    "group":          group,
+                    "source":         filename,
                 })
-    if not records: return None, "לא נמצאו נתונים"
+
+    if not records:
+        return None, "לא נמצאו נתונים"
     return pd.DataFrame(records), None
 
 # ── TPH SHEET ─────────────────────────────────────────────────────────────────────
