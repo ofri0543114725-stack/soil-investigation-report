@@ -8,12 +8,13 @@ import re
 
 st.set_page_config(page_title="דוח סקר קרקע", layout="wide", page_icon="🧪")
 st.title("🧪 מערכת עיבוד תוצאות מעבדה")
-st.caption("v3.6 - fix VOC header depth bug + style_hdr after merge")
+st.caption("v3.6 - VOC_ALIAS: 80+ compound name mappings")
 st.markdown("---")
 
 YELLOW_FILL   = PatternFill("solid", fgColor="FFFF00")
 ORANGE_FILL   = PatternFill("solid", fgColor="FFC000")
 HDR_BLUE_FILL = PatternFill("solid", fgColor="B7D7F0")
+HDR_CYAN_FILL = PatternFill("solid", fgColor="00B0F0")
 
 def thin_border():
     s = Side(style="thin", color="000000")
@@ -23,8 +24,7 @@ def style_hdr(cell, fill=None, sz=11):
     cell.font      = Font(bold=True, name="Arial", size=sz)
     cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     cell.border    = thin_border()
-    if fill:
-        cell.fill = fill
+    if fill: cell.fill = fill
 
 def style_data(cell, hl=None, sz=10):
     cell.font      = Font(bold=bool(hl), name="Arial", size=sz)
@@ -76,17 +76,6 @@ def apply_sid_merge(ws, sid_rows, col=1):
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             c.border = thin_border()
 
-def merged_hdr(ws, r1, c1, r2, c2, val, fill=HDR_BLUE_FILL, sz=11):
-    """Merge cells then apply header style (must set fill AFTER merge)."""
-    if r1!=r2 or c1!=c2:
-        ws.merge_cells(start_row=r1, start_column=c1, end_row=r2, end_column=c2)
-    c = ws.cell(r1, c1, val)
-    c.font      = Font(bold=True, name="Arial", size=sz)
-    c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    c.border    = thin_border()
-    c.fill      = fill
-
-# ── METALS MAPS ──────────────────────────────────────────────────────────────────
 METAL_MAP = {
     "aluminium":"Al","aluminum":"Al","antimony":"Sb","arsenic":"As",
     "barium":"Ba","beryllium":"Be","bismuth":"Bi","boron":"B",
@@ -98,8 +87,12 @@ METAL_MAP = {
     "titanium":"Ti","strontium":"Sr","thallium":"Tl",
     "phosphorus":"P","sulphur":"S","silicon":"Si",
 }
-METALS_ORDER = ["Al","Sb","As","Ba","Be","Bi","B","Cd","Ca","Cr","Co","Cu","Fe",
-                "Pb","Li","Mg","Mn","Hg","Ni","K","Se","Ag","Na","V","Zn"]
+
+METALS_ORDER = [
+    "Al","Sb","As","Ba","Be","Bi","B","Cd","Ca","Cr","Co","Cu","Fe",
+    "Pb","Li","Mg","Mn","Hg","Ni","K","Se","Ag","Na","V","Zn"
+]
+
 THRESH_METAL_MAP = {
     "aluminum":"Al","antimony (metallic)":"Sb","antimony":"Sb",
     "arsenic, inorganic":"As","arsenic":"As","barium":"Ba",
@@ -110,14 +103,14 @@ THRESH_METAL_MAP = {
     "copper":"Cu","iron":"Fe","lead and compounds":"Pb","lead":"Pb",
     "lithium":"Li","magnesium":"Mg","manganese (non-diet)":"Mn","manganese":"Mn",
     "mercuric chloride (and other mercury salts)":"Hg","mercury":"Hg",
-    "nickel soluble salts":"Ni","nickel":"Ni","potassium":"K","selenium":"Se",
-    "silver":"Ag","sodium":"Na","vanadium and compounds":"V","vanadium":"V",
+    "nickel soluble salts":"Ni","nickel":"Ni","potassium":"K",
+    "selenium":"Se","silver":"Ag","sodium":"Na",
+    "vanadium and compounds":"V","vanadium":"V",
     "zinc and compounds":"Zn","zinc":"Zn","molybdenum":"Mo","tin":"Sn",
     "titanium":"Ti","strontium":"Sr","thallium":"Tl",
     "phosphorus":"P","sulphur":"S","silicon":"Si",
 }
 
-# ── VOC/SVOC ORDER ────────────────────────────────────────────────────────────────
 VOC_COMPOUND_ORDER = [
     ("VOCs","Non-Halogenated VOCs","1.2.4-Trimethylbenzene"),
     ("VOCs","Non-Halogenated VOCs","1.3.5-Trimethylbenzene"),
@@ -215,7 +208,7 @@ VOC_COMPOUND_ORDER = [
     ("SVOCs","Phthalates","Dimethyl phthalate"),
 ]
 
-# ── VOC ALIAS: שם מעבדה -> שם בקובץ ערכי סף ──────────────────────────────────
+# ── VOC ALIAS ─────────────────────────────────────────────────────────────────────
 VOC_ALIAS = {
     "1.2.4-trimethylbenzene":           "Trimethylbenzene, 1,2,4-",
     "1,2,4-trimethylbenzene":           "Trimethylbenzene, 1,2,4-",
@@ -236,6 +229,7 @@ VOC_ALIAS = {
     "total xylenes":                    "Xylenes",
     "1.1-dichloroethene":               "1,1-Dichloroethylene",
     "1,1-dichloroethene":               "1,1-Dichloroethylene",
+    "1,1-dichloroethylene":             "1,1-Dichloroethylene",
     "1.2-dichloroethane":               "1,2- (EDC) Dichloroethane",
     "1,2-dichloroethane":               "1,2- (EDC) Dichloroethane",
     "ethylene dichloride":              "1,2- (EDC) Dichloroethane",
@@ -244,25 +238,33 @@ VOC_ALIAS = {
     "tetrachloroethene":                "Tetrachloroethylene (PCE)",
     "tetrachloroethylene":              "Tetrachloroethylene (PCE)",
     "perchloroethylene":                "Tetrachloroethylene (PCE)",
+    "pce":                              "Tetrachloroethylene (PCE)",
     "tetrachloromethane":               "Carbon Tetrachloride",
     "carbon tetrachloride":             "Carbon Tetrachloride",
     "trichloroethene":                  "Trichloroethylene (TCE)",
     "trichloroethylene":                "Trichloroethylene (TCE)",
+    "tce":                              "Trichloroethylene (TCE)",
     "cis-1.2-dichloroethene":           "1,2-cis-Dichloroethylene",
     "cis-1,2-dichloroethene":           "1,2-cis-Dichloroethylene",
     "cis-1,2-dichloroethylene":         "1,2-cis-Dichloroethylene",
+    "1,2-cis-dichloroethylene":         "1,2-cis-Dichloroethylene",
     "trans-1.2-dichloroethene":         "1,2-trans-Dichloroethylene",
     "trans-1,2-dichloroethene":         "1,2-trans-Dichloroethylene",
     "trans-1,2-dichloroethylene":       "1,2-trans-Dichloroethylene",
+    "1,2-trans-dichloroethylene":       "1,2-trans-Dichloroethylene",
     "benz(a)anthracene":                "Benz[a]anthracene",
     "benz[a]anthracene":                "Benz[a]anthracene",
     "benzo(g.h.i)perylene":             "h,i)perylene Benzo(g",
     "benzo(g,h,i)perylene":             "h,i)perylene Benzo(g",
+    "benzo[g,h,i]perylene":             "h,i)perylene Benzo(g",
     "dibenz(a.h)anthracene":            "h]anthracene Dibenz[a",
     "dibenz(a,h)anthracene":            "h]anthracene Dibenz[a",
+    "dibenz[a,h]anthracene":            "h]anthracene Dibenz[a",
     "indeno(1.2.3.cd)pyrene":           "2,3-cd]pyrene Indeno[1",
     "indeno(1,2,3-cd)pyrene":           "2,3-cd]pyrene Indeno[1",
+    "indeno[1,2,3-cd]pyrene":           "2,3-cd]pyrene Indeno[1",
     "4-chloroaniline":                  "p-Chloroaniline",
+    "p-chloroaniline":                  "p-Chloroaniline",
     "1-chloronaphthalene":              "Beta-Chloronaphthalene",
     "2-chloronaphthalene":              "Beta-Chloronaphthalene",
     "6-caprolactam":                    "Caprolactam",
@@ -294,70 +296,82 @@ VOC_ALIAS = {
     "2.4-dinitrotoluene":               "2,4-Dinitrotoluene",
     "2.6-dinitrotoluene":               "2,6-Dinitrotoluene",
     "bis(2-ethylhexyl)phthalate":       "Bis(2-ethylhexyl)phthalate",
-    "1,1'-biphenyl":                    "1,1'-Biphenyl",
+    "1,1'-biphenyl":                   "1,1'-Biphenyl",
+    "n-butylbenzene":                   "n-Butylbenzene",
+    "vinyl chloride":                   "Vinyl Chloride",
 }
 
 # ── PFAS ALIAS ────────────────────────────────────────────────────────────────────
 PFAS_ALIAS = {
-    "2,3,3,3-tetrafluoro-2-(heptafluoropropoxy)propanoic acid (hfpo-da)":"hexafluoropropylene oxide dimer acid (hfpo-da)",
-    "7h-perfluoroheptanoic acid (hpfhpa)":"perfluoroheptanoic acid (pfhpa)",
-    "perfluorobutane sulfonic acid (pfbs)":"perfluorobutanesulfonic acid (pfbs)",
-    "perfluorobutane sulfonate (pfbs)":"perfluorobutanesulfonic acid (pfbs)",
-    "perfluorohexane sulfonic acid (pfhxs)":"perfluorohexanesulfonic acid (pfhxs)",
-    "perfluorohexane sulfonate (pfhxs)":"perfluorohexanesulfonic acid (pfhxs)",
-    "perfluorooctane sulfonic acid (pfos)":"perfluorooctanesulfonic acid (pfos)",
-    "perfluorooctane sulfonate (pfos)":"perfluorooctanesulfonic acid (pfos)",
-    "perfluorooctadecanoic acid (pfocda)":"perfluorooctadecanoic acid (pfoda)",
-    "perfluoroundecanoic acid (pfunda)":"perfluoroundecanoic acid (pfuda)",
-    "perfluorotetradecanoic acid (pfcpda)":"perfluorotetradecanoic acid (pfteta)",
-    "perfluorodecane sulfonic acid (pfds)":"perfluorodecanesulfonic acid (pfds)",
-    "perfluoroheptane sulfonic acid (pfhps)":"perfluoroheptanesulfonic acid (pfhps)",
-    "perfluoropentane sulfonic acid (pfpes)":"perfluoropentanesulfonic acid (pfpes)",
-    "perfluorooctane sulfonamide (fosa)":"perfluorooctanesulfonamide (fosa)",
-    "perfluoropentanoic acid (pfpea)":"perfluoropentanoic acid (pfpea)",
-    "perfluorodecanoic acid (pfda)":"perfluorodecanoic acid (pfda)",
-    "perfluorododecanoic acid (pfdoda)":"perfluorododecanoic acid (pfdoda)",
-    "perfluoroheptanoic acid (pfhpa)":"perfluoroheptanoic acid (pfhpa)",
-    "perfluorotridecanoic acid (pftrda)":"perfluorotridecanoic acid (pftrda)",
-    "perfluorooctanesulfonic acid (pfos)":"perfluorooctanesulfonic acid (pfos)",
+    "2,3,3,3-tetrafluoro-2-(heptafluoropropoxy)propanoic acid (hfpo-da)":
+        "hexafluoropropylene oxide dimer acid (hfpo-da)",
+    "7h-perfluoroheptanoic acid (hpfhpa)":      "perfluoroheptanoic acid (pfhpa)",
+    "perfluorobutane sulfonic acid (pfbs)":     "perfluorobutanesulfonic acid (pfbs)",
+    "perfluorobutane sulfonate (pfbs)":         "perfluorobutanesulfonic acid (pfbs)",
+    "perfluorohexane sulfonic acid (pfhxs)":    "perfluorohexanesulfonic acid (pfhxs)",
+    "perfluorohexane sulfonate (pfhxs)":        "perfluorohexanesulfonic acid (pfhxs)",
+    "perfluorooctane sulfonic acid (pfos)":     "perfluorooctanesulfonic acid (pfos)",
+    "perfluorooctane sulfonate (pfos)":         "perfluorooctanesulfonic acid (pfos)",
+    "perfluorooctadecanoic acid (pfocda)":      "perfluorooctadecanoic acid (pfoda)",
+    "perfluoroundecanoic acid (pfunda)":        "perfluoroundecanoic acid (pfuda)",
+    "perfluorotetradecanoic acid (pfcpda)":     "perfluorotetradecanoic acid (pfteta)",
+    "perfluorodecane sulfonic acid (pfds)":     "perfluorodecanesulfonic acid (pfds)",
+    "perfluoroheptane sulfonic acid (pfhps)":   "perfluoroheptanesulfonic acid (pfhps)",
+    "perfluoropentane sulfonic acid (pfpes)":   "perfluoropentanesulfonic acid (pfpes)",
+    "perfluorooctane sulfonamide (fosa)":       "perfluorooctanesulfonamide (fosa)",
+    "perfluoropentanoic acid (pfpea)":          "perfluoropentanoic acid (pfpea)",
+    "perfluorodecanoic acid (pfda)":            "perfluorodecanoic acid (pfda)",
+    "perfluorododecanoic acid (pfdoda)":        "perfluorododecanoic acid (pfdoda)",
+    "perfluoroheptanoic acid (pfhpa)":          "perfluoroheptanoic acid (pfhpa)",
+    "perfluorotridecanoic acid (pftrda)":       "perfluorotridecanoic acid (pftrda)",
+    "perfluorooctanesulfonic acid (pfos)":      "perfluorooctanesulfonic acid (pfos)",
 }
 
 CANONICAL_KEY = "__CANONICAL_MAP_INTERNAL__"
 
-def canonical_compound(name):
+def canonical_compound(name: str) -> str:
     s = norm(name)
-    s = s.replace("ethylene","ethen").replace("ethene","ethen")
+    s = s.replace("ethylene", "ethen").replace("ethene", "ethen")
     s = re.sub(r"\s*\([^)]+\)\s*$", "", s)
     nums = re.findall(r"\d+", s)
     num_part = ",".join(nums) if nums else ""
     base_no_nums = re.sub(r"[0-9.,/\-]", " ", s)
     base_no_nums = re.sub(r"\s+", "", base_no_nums)
-    return (num_part + " " + base_no_nums).strip()
+    canon = (num_part + " " + base_no_nums).strip()
+    return canon
 
 def match_threshold(compound_name, thresh_dict):
     key = norm(compound_name)
     canon_map = thresh_dict.get(CANONICAL_KEY)
+
     for k in (key, key.replace(".",","), key.replace(",",".")):
         if k in thresh_dict and k != CANONICAL_KEY: return thresh_dict[k]
+
     # VOC alias
     aliased_voc = VOC_ALIAS.get(key) or VOC_ALIAS.get(key.replace(".",","))
     if aliased_voc:
         a_key = norm(aliased_voc)
         for k in (a_key, a_key.replace(".",","), a_key.replace(",",".")):
             if k in thresh_dict and k != CANONICAL_KEY: return thresh_dict[k]
+
+    # PFAS alias
     aliased = PFAS_ALIAS.get(key)
     if aliased:
         a_key = norm(aliased)
         for k in (a_key, a_key.replace(".",","), a_key.replace(",",".")):
             if k in thresh_dict and k != CANONICAL_KEY: return thresh_dict[k]
-    stripped = re.sub(r"\s*\([A-Z0-9:_\-]+\)\s*$","",compound_name).strip().lower()
+
+    stripped = re.sub(r"\s*\([A-Z0-9:_\-]+\)\s*$", "", compound_name).strip().lower()
     for k, v in thresh_dict.items():
         if k == CANONICAL_KEY: continue
-        k_s = re.sub(r"\s*\([A-Z0-9:_\-]+\)\s*$","",k).strip().lower()
+        k_s = re.sub(r"\s*\([A-Z0-9:_\-]+\)\s*$", "", k).strip().lower()
         if len(stripped) > 8 and stripped == k_s: return v
+
     if canon_map:
-        hit = canon_map.get(canonical_compound(compound_name))
+        ck = canonical_compound(compound_name)
+        hit = canon_map.get(ck)
         if hit: return hit
+
     return {}
 
 def load_threshold_file(file_bytes):
@@ -368,15 +382,19 @@ def load_threshold_file(file_bytes):
         if not row[0]: continue
         name = str(row[0]).strip()
         cas  = str(row[1]).strip() if row[1] else "-"
-        def g(ci): return row[ci] if ci<len(row) and row[ci] is not None and str(row[ci]) not in ("NA","") else None
+        def g(ci):
+            return (row[ci] if ci < len(row) and row[ci] is not None
+                    and str(row[ci]) not in ("NA","") else None)
         thresh[norm(name)] = {
-            "name":name,"cas":cas,"units":str(row[3]) if row[3] else "mg/kg",
-            "VSL":g(4),"Ind_A_06":g(8),"Ind_A_6p":g(9),"Ind_B":g(10),
-            "Res_A_06":g(11),"Res_A_6p":g(12),"Res_B":g(13),
+            "name": name, "cas": cas,
+            "units": str(row[3]) if row[3] else "mg/kg",
+            "VSL": g(4), "Ind_A_06": g(8), "Ind_A_6p": g(9),
+            "Ind_B": g(10), "Res_A_06": g(11), "Res_A_6p": g(12), "Res_B": g(13),
         }
     canon_map = {}
-    for k,v in thresh.items():
-        canon_map.setdefault(canonical_compound(k), v)
+    for k, v in thresh.items():
+        ck = canonical_compound(k)
+        canon_map.setdefault(ck, v)
     thresh[CANONICAL_KEY] = canon_map
     return thresh
 
@@ -393,7 +411,7 @@ def tier1_label(land_use, aquifer, depth):
 
 def get_thresh(compound, thresh_dict, t1col):
     t = match_threshold(compound, thresh_dict)
-    return t.get("VSL"), t.get(t1col), t.get("cas","-")
+    return t.get("VSL"), t.get(t1col), t.get("cas", "-")
 
 def build_metals_thresh(thresh_dict, t1col):
     result = {}
@@ -401,46 +419,50 @@ def build_metals_thresh(thresh_dict, t1col):
         if key == CANONICAL_KEY: continue
         sym = THRESH_METAL_MAP.get(key)
         if sym and sym not in result:
-            result[sym] = {"vsl":v.get("VSL"),"tier1":v.get(t1col),"cas":v.get("cas","-")}
+            result[sym] = {"vsl": v.get("VSL"), "tier1": v.get(t1col), "cas": v.get("cas","-")}
     return result
 
-# ── ALS PARSER ────────────────────────────────────────────────────────────────────
 def parse_als_file(file_bytes, filename):
-    try: wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
-    except Exception as e: return None, str(e)
+    try:
+        wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
+    except Exception as e:
+        return None, str(e)
     main = next((wb[n] for n in wb.sheetnames if "Client" in n and "SOIL" in n), wb.worksheets[0])
     rows = list(main.iter_rows(values_only=True))
     sid_idx = next((i for i,r in enumerate(rows) if any("Client Sample ID" in str(v) for v in r if v)), None)
     if sid_idx is None: return None, "לא נמצאה שורת Sample IDs"
-    col2sample = {ci:str(v).strip() for ci,v in enumerate(rows[sid_idx]) if v and v!="Client Sample ID"}
-    ph_idx = next((i for i,r in enumerate(rows) if r and r[0]=="Parameter"), None)
+    col2sample = {ci: str(v).strip() for ci,v in enumerate(rows[sid_idx]) if v and v != "Client Sample ID"}
+    ph_idx = next((i for i,r in enumerate(rows) if r and r[0] == "Parameter"), None)
     if ph_idx is None: return None, "לא נמצאה שורת Parameter"
     records = []; group = "Unknown"
     for row in rows[ph_idx+1:]:
-        p=row[0] if len(row)>0 else None
-        u=row[2] if len(row)>2 else None
-        lor=row[3] if len(row)>3 else None
+        p   = row[0] if len(row)>0 else None
+        u   = row[2] if len(row)>2 else None
+        lor = row[3] if len(row)>3 else None
         if not p: continue
-        if not u and not row[1]: group=str(p).strip(); continue
-        for ci,sname in col2sample.items():
-            sid,depth_val = parse_sample(sname)
+        if not u and not row[1]: group = str(p).strip(); continue
+        for ci, sname in col2sample.items():
+            sid, depth_val = parse_sample(sname)
             if sid is None: continue
-            val=row[ci] if ci<len(row) else None
-            rs=str(val).strip() if val is not None else ""
-            result=None
-            if rs.startswith("<"): result=0.0
+            val = row[ci] if ci < len(row) else None
+            rs  = str(val).strip() if val is not None else ""
+            result = None
+            if rs.startswith("<"): result = 0.0
             elif rs and rs not in ("None",""):
-                try: result=float(rs)
-                except: result=None
+                try: result = float(rs)
+                except: result = None
             if result is not None:
-                lor_val=None
+                lor_val = None
                 if rs.startswith("<"):
-                    try: lor_val=float(rs[1:].strip())
-                    except: lor_val=0.0
-                records.append({"sample_id":sid,"depth":depth_val,"compound":str(p).strip(),
-                    "compound_lower":norm(p),"unit":str(u).strip() if u else "mg/kg",
-                    "lor":lor,"result":result,"result_str":rs,"lor_val":lor_val,
-                    "group":group,"source":filename})
+                    try: lor_val = float(rs[1:].strip())
+                    except: lor_val = 0.0
+                records.append({
+                    "sample_id": sid, "depth": depth_val,
+                    "compound": str(p).strip(), "compound_lower": norm(p),
+                    "unit": str(u).strip() if u else "mg/kg",
+                    "lor": lor, "result": result, "result_str": rs,
+                    "lor_val": lor_val, "group": group, "source": filename,
+                })
     if not records: return None, "לא נמצאו נתונים"
     return pd.DataFrame(records), None
 
@@ -449,31 +471,40 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
     def is_dro(c):
         if "(dro)" in c or "- dro" in c or c.strip()=="dro": return True
         if "(oro)" in c or "- oro" in c: return False
-        return "c10" in c and "c28" in c and "c40" not in c
+        if "c10" in c and "c28" in c and "c40" not in c: return True
+        return False
     def is_oro(c):
         if "(oro)" in c or "- oro" in c or c.strip()=="oro": return True
         if "(dro)" in c or "- dro" in c: return False
-        return ("c24" in c and "c40" in c) or ("c28" in c and "c40" in c)
+        if "c24" in c and "c40" in c: return True
+        if "c28" in c and "c40" in c: return True
+        return False
     def is_total(c):
         if any(x in c for x in ["(dro)","(oro)","- dro","- oro"]): return False
-        return ("c10" in c and "c40" in c) or ("total" in c and ("tph" in c or "hydrocarbon" in c))
+        if "c10" in c and "c40" in c: return True
+        if "total" in c and ("tph" in c or "hydrocarbon" in c): return True
+        return False
 
-    vsl_d,t1_d,_ = get_thresh("C10 - C28 Fraction (DRO)",thresh_dict,t1col)
-    vsl_o,t1_o,_ = get_thresh("C24 - C40 Fraction (ORO)",thresh_dict,t1col)
-    vsl_t,t1_t,_ = get_thresh("TPH - DRO + ORO (Tier 1)",thresh_dict,t1col)
-    vv=[v for v in [vsl_d,vsl_o,vsl_t] if v]; tt=[v for v in [t1_d,t1_o,t1_t] if v]
-    vsl_tot=min(vv) if vv else 350; t1_tot=min(tt) if tt else 350
+    vsl_d,t1_d,_ = get_thresh("C10 - C28 Fraction (DRO)", thresh_dict, t1col)
+    vsl_o,t1_o,_ = get_thresh("C24 - C40 Fraction (ORO)", thresh_dict, t1col)
+    vsl_t,t1_t,_ = get_thresh("TPH - DRO + ORO (Tier 1)", thresh_dict, t1col)
+    vv = [v for v in [vsl_d,vsl_o,vsl_t] if v]
+    tt = [v for v in [t1_d,t1_o,t1_t] if v]
+    vsl_tot = min(vv) if vv else 350
+    t1_tot  = min(tt) if tt else 350
 
     for ci,h in enumerate(["שם קידוח","עומק","TPH DRO","TPH ORO","Total TPH"],1):
-        style_hdr(ws.cell(1,ci,h), HDR_BLUE_FILL)
-    merged_hdr(ws, 1,1,5,1, "שם קידוח")
+        style_hdr(ws.cell(1,ci,h),HDR_BLUE_FILL)
+    ws.merge_cells(start_row=1,start_column=1,end_row=5,end_column=1)
+    c=ws.cell(1,1,"שם קידוח"); c.font=Font(bold=True,name="Arial",size=11)
+    c.fill=HDR_BLUE_FILL; c.alignment=Alignment(horizontal="center",vertical="center",wrap_text=True); c.border=thin_border()
     sub_rows=["יחידות","CAS","VSL",t1lbl]
     sub_vals={"יחידות":"mg/kg","CAS":"C10-C40","VSL":vsl_tot,t1lbl:t1_tot}
     for ri,lbl in enumerate(sub_rows,2):
         style_hdr(ws.cell(ri,2,lbl),HDR_BLUE_FILL)
         for ci in [3,4,5]: style_hdr(ws.cell(ri,ci,sub_vals[lbl]),HDR_BLUE_FILL)
 
-    pivoted={}
+    pivoted = {}
     for _,r in df.iterrows():
         k=(r["sample_id"],r["depth"])
         if k not in pivoted: pivoted[k]={"DRO":"","ORO":"","TOT":"","DRO_f":None,"ORO_f":None,"DRO_lor":None,"ORO_lor":None}
@@ -492,8 +523,8 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
             dro_lor=v["DRO"] and str(v["DRO"]).startswith("<")
             oro_lor=v["ORO"] and str(v["ORO"]).startswith("<")
             dro_empty=not v["DRO"]; oro_empty=not v["ORO"]
-            dro_num=v["DRO_lor"] if dro_lor and v["DRO_lor"] is not None else (v["DRO_f"] or 0)
-            oro_num=v["ORO_lor"] if oro_lor and v["ORO_lor"] is not None else (v["ORO_f"] or 0)
+            dro_num=(v["DRO_lor"] if dro_lor and v["DRO_lor"] is not None else (v["DRO_f"] or 0))
+            oro_num=(v["ORO_lor"] if oro_lor and v["ORO_lor"] is not None else (v["ORO_f"] or 0))
             total_f=dro_num+oro_num
             if (dro_lor or dro_empty) and (oro_lor or oro_empty) and not (dro_empty and oro_empty):
                 total_s=f"<{total_f:.0f}"
@@ -504,12 +535,9 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
         if sid!=prev_sid: sid_rows[sid]=[]
         sid_rows[sid].append(ri)
         sid_val=sid if sid!=prev_sid else None; prev_sid=sid
-        style_data(ws.cell(ri,1,sid_val))
-        style_data(ws.cell(ri,2,depth_val))
-        style_data(ws.cell(ri,3,v["DRO"]),hl_dro)
-        style_data(ws.cell(ri,4,v["ORO"]),hl_oro)
-        style_data(ws.cell(ri,5,total_s),hl_total)
-        ri+=1
+        style_data(ws.cell(ri,1,sid_val)); style_data(ws.cell(ri,2,depth_val))
+        style_data(ws.cell(ri,3,v["DRO"]),hl_dro); style_data(ws.cell(ri,4,v["ORO"]),hl_oro)
+        style_data(ws.cell(ri,5,total_s),hl_total); ri+=1
     apply_sid_merge(ws,sid_rows,col=1)
     for col,w in zip("ABCDE",[14,10,16,16,16]): ws.column_dimensions[col].width=w
     ws.row_dimensions[1].height=15; ws.freeze_panes="A6"
@@ -521,7 +549,9 @@ def write_metals_sheet(ws, df, thresh_dict, t1col, t1lbl):
     present=set(df["sym"].unique())
     metals=[m for m in METALS_ORDER if m in present]+sorted(present-set(METALS_ORDER))
     mt=build_metals_thresh(thresh_dict,t1col)
-    merged_hdr(ws,1,1,5,1,"שם קידוח")
+    ws.merge_cells(start_row=1,start_column=1,end_row=5,end_column=1)
+    c=ws.cell(1,1,"שם קידוח"); c.font=Font(bold=True,name="Arial",size=11)
+    c.fill=HDR_BLUE_FILL; c.alignment=Alignment(horizontal="center",vertical="center",wrap_text=True); c.border=thin_border()
     for ci,h in enumerate(["עומק"]+metals,2): style_hdr(ws.cell(1,ci,h),HDR_BLUE_FILL)
     for ri,lbl in enumerate(["יחידות","CAS","VSL",t1lbl],2):
         style_hdr(ws.cell(ri,2,lbl),HDR_BLUE_FILL)
@@ -538,8 +568,10 @@ def write_metals_sheet(ws, df, thresh_dict, t1col, t1lbl):
         sid_val=sid if sid!=prev_sid else None; prev_sid=sid
         style_data(ws.cell(ri,1,sid_val)); style_data(ws.cell(ri,2,depth_val))
         for ci,sym in enumerate(metals,3):
-            val=row_data.get(sym,"") or ""; val="" if str(val)=="nan" else str(val)
-            style_data(ws.cell(ri,ci,val),check_exceed(val,mt.get(sym,{}).get("vsl"),mt.get(sym,{}).get("tier1")))
+            val=row_data.get(sym,"") or ""
+            val="" if str(val)=="nan" else str(val)
+            hl=check_exceed(val,mt.get(sym,{}).get("vsl"),mt.get(sym,{}).get("tier1"))
+            style_data(ws.cell(ri,ci,val),hl)
         ri+=1
     apply_sid_merge(ws,sid_rows,col=1)
     ws.column_dimensions["A"].width=14; ws.column_dimensions["B"].width=10
@@ -557,11 +589,12 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
         except: return v
     fixed_hdrs=["שם התרכובת","CAS","VSL [µg/kg]",f"{t1lbl} [µg/kg]","יחידות"]
     for ci,h in enumerate(fixed_hdrs,1):
-        merged_hdr(ws,1,ci,2,ci,h)
-    style_hdr(ws.cell(1,6,"LOR"),HDR_BLUE_FILL)
-    style_hdr(ws.cell(2,6,"[µg/kg]"),HDR_BLUE_FILL)
-    style_hdr(ws.cell(1,7,"שם קידוח"),HDR_BLUE_FILL)
-    style_hdr(ws.cell(2,7,"עומק"),HDR_BLUE_FILL)
+        style_hdr(ws.cell(1,ci,h),HDR_BLUE_FILL)
+        ws.merge_cells(start_row=1,start_column=ci,end_row=2,end_column=ci)
+        ws.cell(1,ci).alignment=Alignment(horizontal="center",vertical="center",wrap_text=True)
+        ws.cell(1,ci).fill=HDR_BLUE_FILL; ws.cell(1,ci).border=thin_border()
+    style_hdr(ws.cell(1,6,"LOR"),HDR_BLUE_FILL); style_hdr(ws.cell(2,6,"[µg/kg]"),HDR_BLUE_FILL)
+    style_hdr(ws.cell(1,7,"שם קידוח"),HDR_BLUE_FILL); style_hdr(ws.cell(2,7,"עומק"),HDR_BLUE_FILL)
     prev_sid=None; sid_merge_start_p={}
     for ci,(sid,depth_val) in enumerate(pairs_pfas,8):
         sid_val=sid if sid!=prev_sid else None
@@ -573,15 +606,16 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
         cols_p=[ci for ci,(s,_) in enumerate(pairs_pfas,8) if s==sid]
         if len(cols_p)>1:
             ws.merge_cells(start_row=1,start_column=start_ci,end_row=1,end_column=cols_p[-1])
-            c=ws.cell(1,start_ci)
-            c.alignment=Alignment(horizontal="center",vertical="center"); c.fill=HDR_BLUE_FILL; c.border=thin_border()
+            c=ws.cell(1,start_ci); c.alignment=Alignment(horizontal="center",vertical="center")
+            c.fill=HDR_BLUE_FILL; c.border=thin_border()
     for row_i,cmp in enumerate(df["compound"].unique(),3):
         df_c=df[df["compound"]==cmp]
         vsl_mg,tier1_mg,cas=get_thresh(cmp,thresh_dict,t1col)
         vsl=to_ug(vsl_mg); tier1=to_ug(tier1_mg)
         unit=df_c.iloc[0]["unit"] if not df_c.empty else "µg/kg"
-        lor=df_c.iloc[0]["lor"]  if not df_c.empty else ""
+        lor=df_c.iloc[0]["lor"] if not df_c.empty else ""
         for ci,val in enumerate([cmp,cas,vsl,tier1,unit],1): style_data(ws.cell(row_i,ci,val))
+        ws.merge_cells(start_row=row_i,start_column=6,end_row=row_i,end_column=6)
         style_data(ws.cell(row_i,6,lor)); style_data(ws.cell(row_i,7,None))
         for ci,(sid,depth_val) in enumerate(pairs_pfas,8):
             sub=df_c[(df_c["sample_id"]==sid)&(df_c["depth"]==depth_val)]
@@ -597,11 +631,18 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
     df=df.copy()
     pairs=sorted(df[["sample_id","depth"]].drop_duplicates().values.tolist(),
                  key=lambda x:(sort_key(x[0]),-(x[1] or 0)))
-    # Headers A-F merged rows 1-2, G:H merged rows 1-2 = יחידות
+    # Headers A-F: merge rows 1-2
     for ci,h in enumerate(["קבוצה","קבוצה","שם התרכובת","CAS","VSL",t1lbl],1):
-        merged_hdr(ws,1,ci,2,ci,h,sz=9)
-    merged_hdr(ws,1,7,2,8,"יחידות",sz=9)
-    # col I: שם קידוח / עומק (not merged)
+        ws.merge_cells(start_row=1,start_column=ci,end_row=2,end_column=ci)
+        style_hdr(ws.cell(1,ci,h),HDR_BLUE_FILL,sz=9)
+        ws.cell(1,ci).alignment=Alignment(horizontal="center",vertical="center",wrap_text=True)
+        ws.cell(1,ci).fill=HDR_BLUE_FILL; ws.cell(1,ci).border=thin_border()
+    # G:H merged = יחידות
+    ws.merge_cells(start_row=1,start_column=7,end_row=2,end_column=8)
+    style_hdr(ws.cell(1,7,"יחידות"),HDR_BLUE_FILL,sz=9)
+    ws.cell(1,7).alignment=Alignment(horizontal="center",vertical="center",wrap_text=True)
+    ws.cell(1,7).fill=HDR_BLUE_FILL; ws.cell(1,7).border=thin_border()
+    # col I: שם קידוח / עומק
     style_hdr(ws.cell(1,9,"שם קידוח"),HDR_BLUE_FILL,sz=9)
     style_hdr(ws.cell(2,9,"עומק"),HDR_BLUE_FILL,sz=9)
     # sample columns from col 10
@@ -630,12 +671,9 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
         vsl,tier1,cas=get_thresh(cmp,thresh_dict,t1col)
         cmp_key=norm(cmp)
         cmp_data=als_data.get(cmp_key) or als_data.get(cmp_key.replace(".",",")) or {}
-        style_data(ws.cell(row_i,1,vs),sz=9)
-        style_data(ws.cell(row_i,2,grp),sz=9)
-        style_data(ws.cell(row_i,3,cmp),sz=9)
-        style_data(ws.cell(row_i,4,cas),sz=9)
-        style_data(ws.cell(row_i,5,vsl),sz=9)
-        style_data(ws.cell(row_i,6,tier1),sz=9)
+        style_data(ws.cell(row_i,1,vs),sz=9); style_data(ws.cell(row_i,2,grp),sz=9)
+        style_data(ws.cell(row_i,3,cmp),sz=9); style_data(ws.cell(row_i,4,cas),sz=9)
+        style_data(ws.cell(row_i,5,vsl),sz=9); style_data(ws.cell(row_i,6,tier1),sz=9)
         ws.merge_cells(start_row=row_i,start_column=7,end_row=row_i,end_column=8)
         c=ws.cell(row_i,7,"mg/kg"); c.font=Font(name="Arial",size=9)
         c.alignment=Alignment(horizontal="center",vertical="center"); c.border=thin_border()
@@ -643,10 +681,11 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
         for ci,(sid,depth_val) in enumerate(pairs,10):
             rs=cmp_data.get((sid,depth_val),"")
             style_data(ws.cell(row_i,ci,rs),check_exceed(rs,vsl,tier1),sz=9)
-    # merge col A
+    # merge col A: VOCs rows 3-32, SVOCs rows 33-96
     for r1,r2,val in [(3,32,"VOCs"),(33,96,"SVOCs")]:
-        merged_hdr(ws,r1,1,r2,1,val,fill=PatternFill("solid",fgColor="FFFFFF"),sz=9)
-        ws.cell(r1,1).fill=PatternFill("solid",fgColor="FFFFFF")  # white bg for data area
+        ws.merge_cells(start_row=r1,start_column=1,end_row=r2,end_column=1)
+        c=ws.cell(r1,1,val); c.font=Font(bold=True,name="Arial",size=9)
+        c.alignment=Alignment(horizontal="center",vertical="center",wrap_text=True); c.border=thin_border()
     # merge col B
     b_ranges=[
         (3,12,"Non-Halogenated VOCs"),(13,16,"BTEX"),(17,32,"Halogenated VOCs"),
@@ -657,8 +696,9 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
         (90,90,"Pesticides"),(91,96,"Phthalates"),
     ]
     for r1,r2,val in b_ranges:
-        merged_hdr(ws,r1,2,r2,2,val,fill=PatternFill("solid",fgColor="FFFFFF"),sz=9)
-        ws.cell(r1,2).fill=PatternFill("solid",fgColor="FFFFFF")
+        if r2>r1: ws.merge_cells(start_row=r1,start_column=2,end_row=r2,end_column=2)
+        c=ws.cell(r1,2,val); c.font=Font(bold=True,name="Arial",size=9)
+        c.alignment=Alignment(horizontal="center",vertical="center",wrap_text=True); c.border=thin_border()
     ws.column_dimensions["A"].width=8; ws.column_dimensions["B"].width=22
     ws.column_dimensions["C"].width=35; ws.column_dimensions["D"].width=12
     ws.column_dimensions["E"].width=10; ws.column_dimensions["F"].width=12
@@ -707,7 +747,6 @@ with st.expander(f"👁️ תצוגה מקדימה ({len(df_all)} שורות)"):
 with st.expander("קבוצות שנמצאו"): st.write(df_all["group"].unique().tolist())
 
 def dg(kw): return df_all[df_all["group"].str.contains("|".join(kw),case=False,na=False)]
-
 tph_df   =dg(["petroleum","tph","hydrocarbon"])
 metals_df=dg(["metal","cation","extractable"])
 pfas_df  =dg(["perfluor","pfas","fluorin"])
