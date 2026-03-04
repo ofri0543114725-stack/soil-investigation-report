@@ -47,29 +47,28 @@ def sort_key(sid):
     return int(m.group(1)) if m else 9999
 
 def parse_sample(sname):
-    """Parse ALS sample name -> (sid, depth). Handles 'S85 (0.5)', 'S1-1.0', 'S85'."""
     sname = str(sname).strip()
-    if "DUP" in sname.upper(): return None, None   # skip DUPs
-    # format: "S85 (0.5)" or "S85(0.5)"
+    if "DUP" in sname.upper(): return None, None
     m = re.match(r"^(S\d+[A-Za-z0-9]*)\s*\(([0-9.]+)\)", sname)
     if m: return m.group(1), float(m.group(2))
-    # format: "S1-1.0"
     m = re.match(r"^(S\d+)-([0-9]+\.?[0-9]*)$", sname)
     if m: return m.group(1), float(m.group(2))
     return sname, None
 
 def check_exceed(val_str, vsl, tier1):
+    """VSL=yellow, TIER1=orange. Only colors actual detections (not <LOR)."""
     if not val_str or str(val_str).strip().startswith("<"): return None
     f = to_float(val_str)
     if f is None: return None
     try:
-        if tier1 is not None and pd.notna(tier1) and float(tier1) > 0 and f > float(tier1): return "tier1"
-        if vsl  is not None and pd.notna(vsl)   and float(vsl)   > 0 and f > float(vsl):   return "vsl"
+        t1f = float(tier1) if tier1 is not None and str(tier1) not in ("-","NA","") and pd.notna(tier1) else None
+        vf  = float(vsl)   if vsl   is not None and str(vsl)   not in ("-","NA","") and pd.notna(vsl)   else None
+        if t1f and t1f > 0 and f > t1f: return "tier1"
+        if vf  and vf  > 0 and f > vf:  return "vsl"
     except: pass
     return None
 
 def apply_sid_merge(ws, sid_rows, col=1):
-    """Merge cells in column for rows belonging to the same sample_id."""
     for sid, rows_list in sid_rows.items():
         if len(rows_list) > 1:
             ws.merge_cells(start_row=rows_list[0], start_column=col,
@@ -77,6 +76,70 @@ def apply_sid_merge(ws, sid_rows, col=1):
             c = ws.cell(rows_list[0], col)
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             c.border = thin_border()
+
+# ── METAL MAP ─────────────────────────────────────────────────────────────────
+# Maps ALS compound names (lowercased) -> symbol
+METAL_MAP = {
+    # standard names from ALS
+    "aluminium":"Al","aluminum":"Al","antimony":"Sb","arsenic":"As","barium":"Ba",
+    "beryllium":"Be","bismuth":"Bi","boron":"B","cadmium":"Cd","calcium":"Ca",
+    "chromium":"Cr","cobalt":"Co","copper":"Cu","iron":"Fe","lead":"Pb",
+    "lithium":"Li","magnesium":"Mg","manganese":"Mn","mercury":"Hg","nickel":"Ni",
+    "potassium":"K","selenium":"Se","silver":"Ag","sodium":"Na","vanadium":"V",
+    "zinc":"Zn","molybdenum":"Mo","tin":"Sn","titanium":"Ti","strontium":"Sr",
+    "thallium":"Tl","phosphorus":"P","sulphur":"S","silicon":"Si",
+}
+METALS_ORDER = ["Al","Sb","As","Ba","Be","Bi","B","Cd","Ca","Cr","Co","Cu","Fe",
+                "Pb","Li","Mg","Mn","Hg","Ni","K","Se","Ag","Na","V","Zn"]
+
+# Maps threshold file names (lowercased, stripped) -> symbol
+# These are the exact names in the user's threshold file
+THRESH_METAL_MAP = {
+    "aluminum":                     "Al",
+    "antimony (metallic)":          "Sb",
+    "antimony":                     "Sb",
+    "arsenic, inorganic":           "As",
+    "arsenic":                      "As",
+    "barium":                       "Ba",
+    "beryllium and compounds":      "Be",
+    "beryllium":                    "Be",
+    "boron and borates only":       "B",
+    "boron":                        "B",
+    "cadmium (water) source: water and air": "Cd",
+    "cadmium":                      "Cd",
+    "calcium":                      "Ca",
+    "chromium, total":              "Cr",
+    "chromium":                     "Cr",
+    "cobalt":                       "Co",
+    "copper":                       "Cu",
+    "iron":                         "Fe",
+    "lead and compounds":           "Pb",
+    "lead":                         "Pb",
+    "lithium":                      "Li",
+    "magnesium":                    "Mg",
+    "manganese (non-diet)":         "Mn",
+    "manganese":                    "Mn",
+    "mercuric chloride (and other mercury salts)": "Hg",
+    "mercury":                      "Hg",
+    "nickel soluble salts":         "Ni",
+    "nickel":                       "Ni",
+    "potassium":                    "K",
+    "selenium":                     "Se",
+    "silver":                       "Ag",
+    "sodium":                       "Na",
+    "vanadium and compounds":       "V",
+    "vanadium":                     "V",
+    "zinc and compounds":           "Zn",
+    "zinc":                         "Zn",
+    "molybdenum":                   "Mo",
+    "tin":                          "Sn",
+    "titanium":                     "Ti",
+    "strontium":                    "Sr",
+    "thallium":                     "Tl",
+    "phosphorus":                   "P",
+    "sulphur":                      "S",
+    "silicon":                      "Si",
+}
 
 # ── PFAS ALIAS ────────────────────────────────────────────────────────────────
 PFAS_ALIAS = {
@@ -96,6 +159,11 @@ PFAS_ALIAS = {
     "perfluoropentane sulfonic acid (pfpes)":       "perfluoropentanesulfonic acid (pfpes)",
     "perfluorooctane sulfonamide (fosa)":           "perfluorooctanesulfonamide (fosa)",
     "perfluoropentanoic acid (pfpea)":              "perfluoropentanoic acid (pfpea)",
+    "perfluorodecanoic acid (pfda)":                "perfluorodecanoic acid (pfda)",
+    "perfluorododecanoic acid (pfdoda)":            "perfluorododecanoic acid (pfdoda)",
+    "perfluoroheptanoic acid (pfhpa)":              "perfluoroheptanoic acid (pfhpa)",
+    "perfluorotridecanoic acid (pftrda)":           "perfluorotridecanoic acid (pftrda)",
+    "perfluorooctanesulfonic acid (pfos)":          "perfluorooctanesulfonic acid (pfos)",
 }
 
 def match_threshold(compound_name, thresh_dict):
@@ -103,29 +171,13 @@ def match_threshold(compound_name, thresh_dict):
     if key in thresh_dict: return thresh_dict[key]
     aliased = PFAS_ALIAS.get(key)
     if aliased and aliased in thresh_dict: return thresh_dict[aliased]
-    # strip trailing abbreviation like "(PFOS)" and compare
     stripped = re.sub(r"\s*\([A-Z0-9:_\-]+\)\s*$", "", compound_name).strip().lower()
     for k, v in thresh_dict.items():
         k_s = re.sub(r"\s*\([A-Z0-9:_\-]+\)\s*$", "", k).strip()
         if len(stripped) > 8 and stripped == k_s: return v
     return {}
 
-# ── METAL MAP ─────────────────────────────────────────────────────────────────
-METAL_MAP = {
-    "aluminium":"Al","aluminum":"Al","antimony":"Sb","arsenic":"As","barium":"Ba",
-    "beryllium":"Be","bismuth":"Bi","boron":"B","cadmium":"Cd","calcium":"Ca",
-    "chromium":"Cr","cobalt":"Co","copper":"Cu","iron":"Fe","lead":"Pb",
-    "lithium":"Li","magnesium":"Mg","manganese":"Mn","mercury":"Hg","nickel":"Ni",
-    "potassium":"K","selenium":"Se","silver":"Ag","sodium":"Na","vanadium":"V",
-    "zinc":"Zn","molybdenum":"Mo","tin":"Sn","titanium":"Ti","strontium":"Sr",
-    "thallium":"Tl","phosphorus":"P","sulphur":"S","silicon":"Si",
-}
-METALS_ORDER = ["Al","Sb","As","Ba","Be","Bi","B","Cd","Ca","Cr","Co","Cu","Fe",
-                "Pb","Li","Mg","Mn","Hg","Ni","K","Se","Ag","Na","V","Zn"]
-
-# ── THRESHOLD ─────────────────────────────────────────────────────────────────
-THRESH_COLS = {"VSL":4,"Ind_A_06":8,"Ind_A_6p":9,"Ind_B":10,"Res_A_06":11,"Res_A_6p":12,"Res_B":13}
-
+# ── THRESHOLD FILE ────────────────────────────────────────────────────────────
 def load_threshold_file(file_bytes):
     wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
     ws = wb.active
@@ -134,7 +186,7 @@ def load_threshold_file(file_bytes):
         if not row[0]: continue
         name = str(row[0]).strip()
         cas  = str(row[1]).strip() if row[1] else "-"
-        def g(ci): return row[ci] if ci < len(row) and row[ci] is not None else None
+        def g(ci): return row[ci] if ci < len(row) and row[ci] is not None and str(row[ci]) not in ("NA","") else None
         thresh[norm(name)] = {
             "name":name,"cas":cas,"units":str(row[3]) if row[3] else "mg/kg",
             "VSL":g(4),"Ind_A_06":g(8),"Ind_A_6p":g(9),"Ind_B":g(10),
@@ -157,12 +209,14 @@ def get_thresh(compound, thresh_dict, t1col):
     t = match_threshold(compound, thresh_dict)
     return t.get("VSL"), t.get(t1col), t.get("cas","-")
 
-def metals_thresh(thresh_dict, t1col):
-    r = {}
+def build_metals_thresh(thresh_dict, t1col):
+    """Build {symbol: {vsl,tier1,cas}} using THRESH_METAL_MAP to match threshold names."""
+    result = {}
     for key, v in thresh_dict.items():
-        sym = METAL_MAP.get(key)
-        if sym: r[sym] = {"vsl":v.get("VSL"),"tier1":v.get(t1col),"cas":v.get("cas","-")}
-    return r
+        sym = THRESH_METAL_MAP.get(key)
+        if sym and sym not in result:   # first match wins
+            result[sym] = {"vsl":v.get("VSL"),"tier1":v.get(t1col),"cas":v.get("cas","-")}
+    return result
 
 # ── ALS PARSER ────────────────────────────────────────────────────────────────
 def parse_als_file(file_bytes, filename):
@@ -184,7 +238,7 @@ def parse_als_file(file_bytes, filename):
         if not m and not u: group=str(p).strip(); continue
         for ci,sname in col2sample.items():
             sid,depth = parse_sample(sname)
-            if sid is None: continue   # DUP
+            if sid is None: continue
             val=row[ci] if ci<len(row) else None
             rs=str(val).strip() if val is not None else ""
             result=None
@@ -206,13 +260,14 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
 
     vsl_d,t1_d,_ = get_thresh("C10 - C28 Fraction (DRO)", thresh_dict, t1col)
     vsl_o,t1_o,_ = get_thresh("C24 - C40 Fraction (ORO)", thresh_dict, t1col)
-    vv=[v for v in [vsl_d,vsl_o] if v]; tt=[v for v in [t1_d,t1_o] if v]
+    # use TPH total entry if available
+    vsl_t,t1_t,_ = get_thresh("TPH - DRO + ORO (Tier 1)", thresh_dict, t1col)
+    vv=[v for v in [vsl_d,vsl_o,vsl_t] if v]; tt=[v for v in [t1_d,t1_o,t1_t] if v]
     vsl_tot=min(vv) if vv else 350; t1_tot=min(tt) if tt else 350
 
-    # headers row 1
-    for ci,h in enumerate(["שם קידוח","עומק","","TPH DRO","TPH ORO","Total TPH"],1):
+    # Header row 1 (no col C)
+    for ci,h in enumerate(["שם קידוח","עומק","TPH DRO","TPH ORO","Total TPH"],1):
         style_hdr(ws.cell(1,ci,h))
-    # merge שם קידוח rows 1-5, col 1
     ws.merge_cells(start_row=1,start_column=1,end_row=5,end_column=1)
     ws.cell(1,1).value="שם קידוח"
     ws.cell(1,1).font=Font(bold=True,name="Arial",size=11)
@@ -223,10 +278,9 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
     sub_vals={"יחידות":"mg/kg","CAS":"C10-C40","VSL":vsl_tot,t1lbl:t1_tot}
     for ri,lbl in enumerate(sub_rows,2):
         style_hdr(ws.cell(ri,2,lbl))
-        for ci in [4,5,6]: style_hdr(ws.cell(ri,ci,sub_vals[lbl]))
+        for ci in [3,4,5]: style_hdr(ws.cell(ri,ci,sub_vals[lbl]))
 
-    # pivot — group by (sample_id,depth), one row per pair
-    # first build per-key DRO/ORO — take FIRST non-empty value
+    # pivot
     pivoted = {}
     for _,r in df.iterrows():
         k=(r["sample_id"],r["depth"])
@@ -241,24 +295,34 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
     for (sid,depth),v in sorted(pivoted.items(),key=lambda x:(sort_key(x[0][0]),x[0][1] or 0)):
         dro_f=v["DRO_f"] or 0; oro_f=v["ORO_f"] or 0
         total_f=dro_f+oro_f
-        b_lor=str(v["DRO"]).startswith("<") and str(v["ORO"]).startswith("<")
-        total_s=f"<{total_f:.0f}" if b_lor else f"{total_f:.0f}"
-        hl=check_exceed(total_s,vsl_tot,t1_tot)
+        # total is <LOR only if BOTH are <LOR (non-empty) 
+        dro_lor = v["DRO"] and str(v["DRO"]).startswith("<")
+        oro_lor = v["ORO"] and str(v["ORO"]).startswith("<")
+        dro_empty = not v["DRO"]
+        oro_empty = not v["ORO"]
+        if (dro_lor or dro_empty) and (oro_lor or oro_empty) and not (dro_empty and oro_empty):
+            total_s = f"<{total_f:.0f}"
+        else:
+            total_s = f"{total_f:.0f}"
+
+        # color each column independently
+        hl_dro   = check_exceed(v["DRO"],   vsl_tot, t1_tot)
+        hl_oro   = check_exceed(v["ORO"],   vsl_tot, t1_tot)
+        hl_total = check_exceed(total_s,    vsl_tot, t1_tot)
 
         if sid!=prev_sid: sid_rows[sid]=[]
         sid_rows[sid].append(ri)
-        sid_val=sid if sid!=prev_sid else None
-        prev_sid=sid
+        sid_val=sid if sid!=prev_sid else None; prev_sid=sid
 
         style_data(ws.cell(ri,1,sid_val))
         style_data(ws.cell(ri,2,depth))
-        style_data(ws.cell(ri,3,None))
-        for ci,val in enumerate([v["DRO"],v["ORO"],total_s],4):
-            style_data(ws.cell(ri,ci,val),hl)
+        style_data(ws.cell(ri,3,v["DRO"]),  hl_dro)
+        style_data(ws.cell(ri,4,v["ORO"]),  hl_oro)
+        style_data(ws.cell(ri,5,total_s),   hl_total)
         ri+=1
 
     apply_sid_merge(ws, sid_rows, col=1)
-    for col,w in zip("ABCDEF",[14,10,6,16,16,16]):
+    for col,w in zip("ABCDE",[14,10,16,16,16]):
         ws.column_dimensions[col].width=w
     ws.row_dimensions[1].height=15
     ws.freeze_panes="A6"
@@ -272,9 +336,8 @@ def write_metals_sheet(ws, df, thresh_dict, t1col, t1lbl):
 
     present=set(df["sym"].unique())
     metals=[m for m in METALS_ORDER if m in present]+sorted(present-set(METALS_ORDER))
-    mt=metals_thresh(thresh_dict,t1col)
+    mt=build_metals_thresh(thresh_dict,t1col)
 
-    # merge שם קידוח col 1 rows 1-5
     ws.merge_cells(start_row=1,start_column=1,end_row=5,end_column=1)
     c=ws.cell(1,1,"שם קידוח")
     c.font=Font(bold=True,name="Arial",size=11); c.fill=HDR_BLUE_FILL
@@ -316,12 +379,11 @@ def write_metals_sheet(ws, df, thresh_dict, t1col, t1lbl):
 def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
     df=df.copy()
     samples=sorted(df["sample_id"].unique(),key=sort_key)
-    sdepth={r["sample_id"]:r["depth"] for _,r in df.iterrows() if r["sample_id"] not in {}}
     sdepth={}
     for _,r in df.iterrows():
         if r["sample_id"] not in sdepth: sdepth[r["sample_id"]]=r["depth"]
 
-    fixed=["שם התרכובת","CAS","VSL",t1lbl,"יחידות","LOR","שם הקידוח"]
+    fixed=["שם התרכובת","CAS","VSL [µg/kg]",f"{t1lbl}\n[µg/kg]","יחידות","LOR","שם הקידוח"]
     all_cols=fixed+samples
     for ci,h in enumerate(all_cols,1): style_hdr(ws.cell(1,ci,h),HDR_CYAN_FILL)
     style_hdr(ws.cell(2,7,"עומק"),HDR_CYAN_FILL)
@@ -329,9 +391,16 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
 
     for row_i,cmp in enumerate(df["compound"].unique(),3):
         df_c=df[df["compound"]==cmp]
-        vsl,tier1,cas=get_thresh(cmp,thresh_dict,t1col)
-        unit=df_c.iloc[0]["unit"] if not df_c.empty else "µg/kg"
-        lor=df_c.iloc[0]["lor"] if not df_c.empty else ""
+        vsl_mg,tier1_mg,cas=get_thresh(cmp,thresh_dict,t1col)
+        # convert mg/kg -> µg/kg (×1000)
+        def to_ug(v):
+            if v is None: return None
+            try: return round(float(v)*1000, 6)
+            except: return v
+        vsl   = to_ug(vsl_mg)
+        tier1 = to_ug(tier1_mg)
+        unit = df_c.iloc[0]["unit"] if not df_c.empty else "µg/kg"
+        lor  = df_c.iloc[0]["lor"]  if not df_c.empty else ""
         for ci,val in enumerate([cmp,cas,vsl,tier1,unit,lor,None],1): style_data(ws.cell(row_i,ci,val))
         for ci,sid in enumerate(samples,8):
             rs=df_c[df_c["sample_id"]==sid].iloc[0]["result_str"] if not df_c[df_c["sample_id"]==sid].empty else ""
@@ -374,13 +443,12 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
 st.sidebar.header("⚙️ הגדרות ערכי סף")
-st.sidebar.markdown("🟡 חריגה מעל VSL &nbsp;&nbsp; 🟠 חריגה מעל TIER 1")
+st.sidebar.markdown("🟡 חריגה מ-VSL &nbsp;&nbsp;&nbsp; 🟠 חריגה מ-TIER 1")
 st.sidebar.markdown("---")
-
 land_use=st.sidebar.selectbox("Land Use",["Industrial","Residential"],index=0)
 aquifer=st.sidebar.selectbox("Aquifer Sensitivity",["A-1, A, B","B-1 or C"],index=0)
 depth_opts=["Not Applicable"] if "b-1" in aquifer.lower() else ["0 - 6 m",">6 m"]
-depth=st.sidebar.selectbox("Depth to Groundwater from the Contaminated Zone",depth_opts,index=0)
+depth=st.sidebar.selectbox("Depth to Groundwater",depth_opts,index=0)
 t1col=get_tier1_col(land_use,aquifer,depth)
 t1lbl=tier1_label(land_use,aquifer,depth)
 st.sidebar.info(f"TIER 1: **{land_use}** | {aquifer} | {depth}")
@@ -392,7 +460,7 @@ with c1:
     thr_file=st.file_uploader("העלה קובץ ערכי הסף המאוחד",type=["xlsx","xls"],key="thr")
 with c2:
     st.subheader("📂 קבצי ALS")
-    data_files=st.file_uploader("העלה קבצי ALS (אפשר כמה)",type=["xlsx","xls"],accept_multiple_files=True,key="data")
+    data_files=st.file_uploader("העלה קבצי ALS",type=["xlsx","xls"],accept_multiple_files=True,key="data")
 
 if not thr_file: st.info("👆 העלה קובץ ערכי סף וקבצי ALS"); st.stop()
 if not data_files: st.warning("⚠️ העלה קבצי ALS"); st.stop()
@@ -415,7 +483,6 @@ with st.expander("קבוצות שנמצאו"): st.write(df_all["group"].unique()
 
 # ── CLASSIFY ───────────────────────────────────────────────────────────────────
 def dg(kw): return df_all[df_all["group"].str.contains("|".join(kw),case=False,na=False)]
-
 tph_df    = dg(["petroleum","tph","hydrocarbon"])
 metals_df = dg(["metal","cation","extractable"])
 pfas_df   = dg(["perfluor","pfas","fluorin"])
