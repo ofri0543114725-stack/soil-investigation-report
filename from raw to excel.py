@@ -1470,6 +1470,270 @@ def build_word_report(table_configs, thresh_dict, t1col, t1lbl):
 
 tab_excel, tab_word = st.tabs(["📊 יצוא Excel", "📄 יצוא Word"])
 
+
+# ── BUILD WORD FROM EXCEL ─────────────────────────────────────────────────────
+def build_word_from_excel(table_configs):
+    """
+    קורא טבלאות מקבצי Excel ומחלק לדפי Word.
+    כל config: {file, title, page_size, landscape}
+    שומר צבעי רקע מהאקסל (צהוב=VSL, כתום=TIER1)
+    """
+    from openpyxl import load_workbook as lw
+    from openpyxl.styles import PatternFill
+
+    PAGE_SIZES_DXA = {
+        "A4":      (11906, 16838),
+        "Tabloid": (17280, 22320),
+    }
+    MARGIN = 540  # 0.375 inch
+
+    def content_width(page_size, landscape):
+        w, h = PAGE_SIZES_DXA[page_size]
+        return (h if landscape else w) - 2 * MARGIN
+
+    def set_page(section, page_size, landscape):
+        w, h = PAGE_SIZES_DXA[page_size]
+        if landscape:
+            section.page_width  = Twips(h)
+            section.page_height = Twips(w)
+            section.orientation = WD_ORIENT.LANDSCAPE
+        else:
+            section.page_width  = Twips(w)
+            section.page_height = Twips(h)
+            section.orientation = WD_ORIENT.PORTRAIT
+        for attr in ('top_margin','bottom_margin','left_margin','right_margin'):
+            setattr(section, attr, Twips(MARGIN))
+
+    def cell_color(xl_cell):
+        """מחזיר hex צבע רקע של תא Excel, או None"""
+        try:
+            fill = xl_cell.fill
+            if fill and fill.fill_type not in (None, "none"):
+                fg = fill.fgColor
+                if fg.type == "rgb" and fg.rgb not in ("00000000","FFFFFFFF","FF000000"):
+                    return fg.rgb[-6:]  # strip alpha
+        except:
+            pass
+        return None
+
+    def set_cell_bg(cell, hex_color):
+        tc = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:shd')):
+            tcPr.remove(old)
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:val'), 'clear')
+        shd.set(qn('w:color'), 'auto')
+        shd.set(qn('w:fill'), hex_color)
+        tcPr.append(shd)
+
+    def set_borders(cell):
+        tc = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:tcBorders')):
+            tcPr.remove(old)
+        tcB = OxmlElement('w:tcBorders')
+        for side in ('top','left','bottom','right'):
+            el = OxmlElement(f'w:{side}')
+            el.set(qn('w:val'), 'single')
+            el.set(qn('w:sz'), '4')
+            el.set(qn('w:space'), '0')
+            el.set(qn('w:color'), '000000')
+            tcB.append(el)
+        tcPr.append(tcB)
+
+    def set_col_w(cell, w_twips):
+        tc = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:tcW')):
+            tcPr.remove(old)
+        tcW = OxmlElement('w:tcW')
+        tcW.set(qn('w:w'), str(w_twips))
+        tcW.set(qn('w:type'), 'dxa')
+        tcPr.append(tcW)
+
+    def set_tbl_w(table, w_twips):
+        tbl = table._tbl
+        tblPr = tbl.find(qn('w:tblPr'))
+        if tblPr is None:
+            tblPr = OxmlElement('w:tblPr')
+            tbl.insert(0, tblPr)
+        for old in tblPr.findall(qn('w:tblW')):
+            tblPr.remove(old)
+        tblW = OxmlElement('w:tblW')
+        tblW.set(qn('w:w'), str(w_twips))
+        tblW.set(qn('w:type'), 'dxa')
+        tblPr.append(tblW)
+
+    def write_cell(cell, value, bg_hex=None, bold=False, size=8, is_header=False):
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        set_borders(cell)
+        if bg_hex:
+            set_cell_bg(cell, bg_hex)
+        elif is_header:
+            set_cell_bg(cell, "B7D7F0")
+        else:
+            set_cell_bg(cell, "FFFFFF")
+        p = cell.paragraphs[0]
+        p.clear()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run(str(value) if value is not None else "")
+        run.bold = bold or is_header
+        run.font.name = "Arial"
+        run.font.size = Pt(size)
+
+    doc = Document()
+    # remove default empty paragraph
+    for p in doc.paragraphs:
+        p._element.getparent().remove(p._element)
+
+    first_section = True
+
+    for cfg in table_configs:
+        file_obj  = cfg["file"]
+        title     = cfg["title"]
+        page_size = cfg.get("page_size", "A4")
+        landscape = cfg.get("landscape", False)
+
+        # Read Excel
+        wb = lw(io.BytesIO(file_obj.read()), data_only=True)
+        ws = wb.active
+
+        all_rows = list(ws.iter_rows())
+        if not all_rows:
+            continue
+
+        n_cols = ws.max_column
+        n_rows = ws.max_row
+
+        # Calc rows per page
+        PAGE_H = PAGE_SIZES_DXA[page_size][1] if not landscape else PAGE_SIZES_DXA[page_size][0]
+        avail_h = PAGE_H - 2*MARGIN
+        TITLE_H = 450
+        LEGEND_H = 350
+        HDR_H = 400   # header row height
+        ROW_H = 280   # data row height
+
+        # how many header rows? (look for merged cells / color pattern in first rows)
+        # Simple heuristic: count rows at top that have colored background
+        n_header_rows = 0
+        for row in all_rows[:5]:
+            has_color = any(cell_color(c) in ("B7D7F0","00B0F0","b7d7f0","00b0f0") or
+                           (c.font and c.font.bold) for c in row if c.value)
+            if has_color:
+                n_header_rows += 1
+            else:
+                break
+        if n_header_rows == 0:
+            n_header_rows = 1
+
+        data_rows_all = all_rows[n_header_rows:]
+        header_rows   = all_rows[:n_header_rows]
+
+        rows_per_page = max(5, int(
+            (avail_h - TITLE_H - LEGEND_H - n_header_rows * HDR_H) / ROW_H
+        ))
+
+        # Split data into chunks
+        chunks = [data_rows_all[i:i+rows_per_page] for i in range(0, len(data_rows_all), rows_per_page)]
+        if not chunks:
+            chunks = [[]]
+        total_parts = len(chunks)
+
+        cw = content_width(page_size, landscape)
+        # Column widths - distribute evenly, first col slightly wider
+        if n_cols <= 5:
+            w0 = int(cw * 0.22)
+            wr = int((cw - w0) / max(n_cols-1,1))
+            col_ws = [w0] + [wr]*(n_cols-1)
+        else:
+            w0 = int(cw * 0.16)
+            w1 = int(cw * 0.07)
+            wr = int((cw - w0 - w1) / max(n_cols-2,1))
+            col_ws = [w0, w1] + [wr]*(n_cols-2)
+        # Adjust last col
+        diff = cw - sum(col_ws)
+        if col_ws:
+            col_ws[-1] += diff
+
+        for part_idx, chunk in enumerate(chunks):
+            part_num = part_idx + 1
+            part_str = f"  (חלק {part_num} מתוך {total_parts})" if total_parts > 1 else ""
+
+            # Section
+            if first_section:
+                section = doc.sections[0]
+                first_section = False
+            else:
+                section = doc.add_section()
+            set_page(section, page_size, landscape)
+
+            # Title
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            pPr = p._p.get_or_add_pPr()
+            bidi = OxmlElement('w:bidi')
+            pPr.append(bidi)
+            p.paragraph_format.space_before = Pt(0)
+            p.paragraph_format.space_after  = Pt(4)
+            run = p.add_run(f"{title}{part_str}")
+            run.bold = True
+            run.font.name = "Arial"
+            run.font.size = Pt(12)
+
+            # Table
+            n_data = len(chunk)
+            table = doc.add_table(rows=n_header_rows + n_data, cols=n_cols)
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            set_tbl_w(table, cw)
+
+            # Header rows
+            for hi, hrow in enumerate(header_rows):
+                for ci, xl_cell in enumerate(hrow[:n_cols]):
+                    cell = table.cell(hi, ci)
+                    set_col_w(cell, col_ws[ci])
+                    bg = cell_color(xl_cell)
+                    write_cell(cell, xl_cell.value, bg_hex=bg, is_header=(bg is None), size=8)
+
+            # Data rows
+            has_yellow = False
+            has_orange = False
+            for ri, xl_row in enumerate(chunk):
+                for ci, xl_cell in enumerate(xl_row[:n_cols]):
+                    cell = table.cell(n_header_rows + ri, ci)
+                    set_col_w(cell, col_ws[ci])
+                    bg = cell_color(xl_cell)
+                    if bg and bg.upper() in ("FFFF00","FFC000"):
+                        if bg.upper() == "FFFF00": has_yellow = True
+                        if bg.upper() == "FFC000": has_orange = True
+                    write_cell(cell, xl_cell.value, bg_hex=bg, size=8)
+
+            # Legend
+            if has_yellow or has_orange:
+                lp = doc.add_paragraph()
+                lp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                pPr2 = lp._p.get_or_add_pPr()
+                bidi2 = OxmlElement('w:bidi')
+                pPr2.append(bidi2)
+                lp.paragraph_format.space_before = Pt(3)
+                if has_yellow:
+                    r1 = lp.add_run("■ ")
+                    r1.font.name = "Arial"; r1.font.size = Pt(8)
+                    r1.font.color.rgb = RGBColor.from_string("FFFF00")
+                    r2 = lp.add_run("בצהוב - חריגה מערך הסף VSL    ")
+                    r2.font.name = "Arial"; r2.font.size = Pt(8)
+                if has_orange:
+                    r3 = lp.add_run("■ ")
+                    r3.font.name = "Arial"; r3.font.size = Pt(8)
+                    r3.font.color.rgb = RGBColor.from_string("FFC000")
+                    r4 = lp.add_run("בכתום - חריגה מערך הסף TIER 1")
+                    r4.font.name = "Arial"; r4.font.size = Pt(8)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
 with tab_excel:
     # ── SIDEBAR
     st.sidebar.header("⚙️ הגדרות ערכי סף")
@@ -1536,85 +1800,79 @@ with tab_excel:
             st.download_button("⬇️ הורד קובץ Excel מעובד",data=buf,file_name="soil_report.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
 
+
 with tab_word:
     st.header("📄 יצוא דוח Word")
-    st.caption("העלה קבצי ALS וקובץ ערכי סף, הגדר כל טבלה וצור דוח Word מסודר")
+    st.caption("העלה קובץ Excel עם טבלה, הגדר כותרת וסוג דף – האפליקציה תחלק לדפים עם כותרת בכל דף")
     st.markdown("---")
 
-    st.subheader("📂 העלאת קבצי ALS לפי סוג")
-    TABLE_TYPES_W = ["TPH", "Metals", "VOC+SVOC", "PFAS"]
-    TABLE_LABELS_W = {"TPH":"🛢️ TPH","Metals":"⚗️ Metals","VOC+SVOC":"🧪 VOC+SVOC","PFAS":"🔬 PFAS"}
-    TABLE_KW_W = {
-        "TPH":["petroleum","tph","hydrocarbon"],
-        "Metals":["metal","cation","extractable"],
-        "PFAS":["perfluor","pfas","fluorin"],
-        "VOC+SVOC":["voc","svoc","btex","aromatic","halogenated","volatile","alcohol","aldehyde","ketone","phenol","pah","aniline","nitro","phthalate","pesticide","pcb","other"],
-    }
-    w_dfs = {}
-    w_cols = st.columns(4)
-    for idx, ttype in enumerate(TABLE_TYPES_W):
-        with w_cols[idx]:
-            st.markdown(f"**{TABLE_LABELS_W[ttype]}**")
-            uf = st.file_uploader(f"קובץ ALS", type=["xlsx","xls"], key=f"w_file_{ttype}")
-            if uf:
-                df_p, err = parse_als_file(uf.read(), uf.name)
-                if err:
-                    st.error(f"שגיאה: {err}")
-                    w_dfs[ttype] = None
-                else:
-                    kw = TABLE_KW_W[ttype]
-                    w_dfs[ttype] = df_p[df_p["group"].str.contains("|".join(kw),case=False,na=False)]
-                    n = w_dfs[ttype]["sample_id"].nunique() if not w_dfs[ttype].empty else 0
-                    st.success(f"✅ {n} קידוחים")
-            else:
-                w_dfs[ttype] = None
+    # ── עד 4 טבלאות ──────────────────────────────────────────────────────────
+    TABLE_SLOTS = ["TPH", "Metals", "VOC+SVOC", "PFAS"]
+    TABLE_ICONS = {"TPH":"🛢️","Metals":"⚗️","VOC+SVOC":"🧪","PFAS":"🔬"}
+
+    w_tables = []
+
+    for slot in TABLE_SLOTS:
+        icon = TABLE_ICONS[slot]
+        with st.expander(f"{icon} טבלת {slot}", expanded=(slot=="TPH")):
+            col_f, col_s = st.columns([2,1])
+            with col_f:
+                uf = st.file_uploader(f"העלה קובץ Excel עבור {slot}", type=["xlsx","xls"], key=f"wf_{slot}")
+                custom_title = st.text_input("כותרת הטבלה בדוח", value=f"טבלת {slot}", key=f"wt_{slot}")
+            with col_s:
+                page_size = st.selectbox("סוג דף", ["A4","Tabloid"], key=f"wp_{slot}")
+                landscape = st.selectbox("כיוון דף", ["לאורך (Portrait)","לרוחב (Landscape)"],
+                    index=1 if slot in ("Metals","VOC+SVOC","PFAS") else 0,
+                    key=f"wo_{slot}") == "לרוחב (Landscape)"
+                include = st.checkbox("כלול בדוח", value=uf is not None, key=f"wi_{slot}")
+
+            if uf and include:
+                w_tables.append({
+                    "slot": slot,
+                    "file": uf,
+                    "title": custom_title,
+                    "page_size": page_size,
+                    "landscape": landscape,
+                })
+
     st.markdown("---")
 
-    if True:
-        st.subheader("📋 סדר ועיצוב הטבלאות")
-        if "w_order" not in st.session_state:
-            st.session_state.w_order = TABLE_TYPES_W.copy()
-        ord_cols = st.columns(4)
-        new_order = []
-        for i, col in enumerate(ord_cols):
-            with col:
-                dv = st.session_state.w_order[i] if i < len(st.session_state.w_order) else TABLE_TYPES_W[i]
-                choice = st.selectbox(f"מיקום {i+1}", TABLE_TYPES_W, index=TABLE_TYPES_W.index(dv), key=f"w_ord_{i}")
-                new_order.append(choice)
-        st.session_state.w_order = new_order
-
-        w_configs = {}
-        for ttype in TABLE_TYPES_W:
-            has_data = w_dfs.get(ttype) is not None and not w_dfs[ttype].empty
-            with st.expander(f"{TABLE_LABELS_W[ttype]}  {chr(10004)+chr(65039)+' נטען' if has_data else chr(9888)+chr(65039)+' אין נתונים'}", expanded=has_data):
-                ca, cb, cc = st.columns([3,1,1])
-                with ca:
-                    include = st.checkbox("כלול בדוח", value=has_data, key=f"w_inc_{ttype}", disabled=not has_data)
-                    custom_title = st.text_input("שם הטבלה", value="", key=f"w_ttl_{ttype}", placeholder=f"טבלת {ttype}")
-                with cb:
-                    page_size = st.selectbox("סוג דף", ["A4","Tabloid"], key=f"w_pg_{ttype}")
-                with cc:
-                    landscape = st.selectbox("כיוון", ["לאורך","לרוחב"], index=1 if ttype in ("Metals","VOC+SVOC","PFAS") else 0, key=f"w_ori_{ttype}") == "לרוחב"
-                w_configs[ttype] = {"include": include if has_data else False, "title": custom_title.strip() or f"טבלת {ttype}", "page_size": page_size, "landscape": landscape, "df": w_dfs.get(ttype), "type": ttype}
+    # ── סדר הטבלאות ──────────────────────────────────────────────────────────
+    if w_tables:
+        st.subheader("📋 סדר הטבלאות בדוח")
+        available_slots = [t["slot"] for t in w_tables]
+        if len(available_slots) > 1:
+            ord_cols = st.columns(len(available_slots))
+            new_order_slots = []
+            for i, col in enumerate(ord_cols):
+                with col:
+                    dv = available_slots[i] if i < len(available_slots) else available_slots[0]
+                    choice = st.selectbox(f"מיקום {i+1}", available_slots,
+                        index=available_slots.index(dv), key=f"word_ord_{i}")
+                    new_order_slots.append(choice)
+            w_tables_ordered = sorted(w_tables, key=lambda t: new_order_slots.index(t["slot"]) if t["slot"] in new_order_slots else 99)
+        else:
+            w_tables_ordered = w_tables
 
         st.markdown("---")
-        tables_to_export = [t for t in st.session_state.w_order if w_configs[t]["include"]]
         c_btn, c_info = st.columns([1,2])
         with c_btn:
-            export_word = st.button("📄 צור קובץ Word", type="primary", use_container_width=True)
+            go_word = st.button("📄 צור קובץ Word", type="primary", use_container_width=True)
         with c_info:
-            if tables_to_export:
-                st.info(f"יכיל {len(tables_to_export)} טבלאות: {' → '.join(tables_to_export)}")
-            else:
-                st.warning("לא נבחרו טבלאות")
+            names = [t["title"] for t in w_tables_ordered]
+            st.info(f"יכיל {len(names)} טבלאות: {' → '.join(names)}")
 
-        if export_word:
-            if not tables_to_export:
-                st.error("❌ לא נבחרו טבלאות")
-            else:
-                ordered_cfgs = [{"type":w_configs[t]["type"],"df":w_configs[t]["df"],"title":w_configs[t]["title"],"page_size":w_configs[t]["page_size"],"landscape":w_configs[t]["landscape"]} for t in st.session_state.w_order if w_configs[t]["include"]]
-                with st.spinner("⏳ מכין קובץ Word..."):
-                    docx_bytes = build_word_report(ordered_cfgs, {}, "", "")
-                st.success(f"✅ הדוח נוצר! ({len(tables_to_export)} טבלאות)")
-                st.download_button("⬇️ הורד דוח Word", data=docx_bytes, file_name="soil_report.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True)
+        if go_word:
+            try:
+                with st.spinner("⏳ בונה דוח Word..."):
+                    docx_bytes = build_word_from_excel(w_tables_ordered)
+                st.success(f"✅ הדוח נוצר! ({len(w_tables_ordered)} טבלאות)")
+                st.download_button("⬇️ הורד דוח Word", data=docx_bytes,
+                    file_name="soil_report.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True)
+            except Exception as e:
+                st.error(f"❌ שגיאה: {e}")
+                import traceback; st.code(traceback.format_exc())
+    else:
+        st.info("👆 העלה לפחות קובץ Excel אחד למעלה")
