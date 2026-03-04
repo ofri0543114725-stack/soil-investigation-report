@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 from openpyxl import Workbook, load_workbook
@@ -10,7 +9,7 @@ import re
 # ── BASIC PAGE SETUP ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="דוח סקר קרקע", layout="wide", page_icon="🧪")
 st.title("🧪 מערכת עיבוד תוצאות מעבדה")
-st.caption("v3.1 - TPH / Metals / PFAS / VOC+SVOC (threshold match+depth label)")
+st.caption("v3.2 - Improved threshold matching & VOC depth label")
 st.markdown("---")
 
 # ── STYLES ───────────────────────────────────────────────────────────────────────
@@ -49,7 +48,7 @@ def style_data(cell, hl=None, sz=10):
 
 # ── HELPERS ──────────────────────────────────────────────────────────────────────
 def norm(s):
-    """Normalize strings for matching."""
+    """Normalize strings for matching (lowercase, trim, collapse spaces)."""
     s = "" if s is None else str(s).strip().lower()
     return re.sub(r"\s+", " ", s.replace("\xa0", " "))
 
@@ -350,18 +349,64 @@ PFAS_ALIAS = {
         "perfluorooctanesulfonic acid (pfos)",
 }
 
+CANONICAL_KEY = "__CANONICAL_MAP_INTERNAL__"
+
+
+def canonical_compound(name: str) -> str:
+    """
+    Canonical form to match threshold names and ALS names even when:
+    - המספרים לפני/אחרי השם (1,2,4-trimethylbenzene vs trimethylbenzene, 1,2,4)
+    - ethene / ethen / ethylene שונים
+    """
+    s = norm(name)
+
+    # unify ethene/ethylene/ethen
+    s = s.replace("ethylene", "ethen")
+    s = s.replace("ethene", "ethen")
+
+    # remove brackets content at end for canonical (already handled elsewhere גם)
+    s = re.sub(r"\s*\([^)]+\)\s*$", "", s)
+
+    # replace - and / with spaces for tokenization
+    s = s.replace("-", " ").replace("/", " ")
+
+    tokens = re.split(r"\s+", s)
+    num_tokens = []
+    word_tokens = []
+    for t in tokens:
+        t = t.strip(",;")
+        if not t:
+            continue
+        if re.search(r"\d", t):
+            num_tokens.append(t)
+        else:
+            word_tokens.append(t)
+
+    # sort numeric & word parts so "1,2,4 trimethylbenzene" == "trimethylbenzene 1,2,4"
+    num_part  = ",".join(sorted(num_tokens)) if num_tokens else ""
+    word_part = " ".join(word_tokens)
+    canon = (num_part + " " + word_part).strip()
+    return canon
+
 
 def match_threshold(compound_name, thresh_dict):
     """
     Match compound name from ALS/VOC list to threshold table.
-    מחזק מאוד את ההתאמה: נקודות/פסיקים, alias של PFAS, והורדת סוגריים.
+    חיזוק התאמה:
+    - נקודות/פסיקים (1.2.4 ↔ 1,2,4)
+    - אליאסים של PFAS
+    - הסרת סוגריים
+    - צורה קנונית (מספרים לפני/אחרי + ethene/ethylene)
     """
     key = norm(compound_name)
 
-    # 1. ניסיון ישיר + וריאציות נקודה/פסיק (1.2.4 ↔ 1,2,4)
+    # 0. canonical map (נבנה פעם אחת ב-load_threshold_file)
+    canon_map = thresh_dict.get(CANONICAL_KEY)
+
+    # 1. ניסיון ישיר + וריאציות נקודה/פסיק
     candidates = [key, key.replace(".", ","), key.replace(",", ".")]
     for k in candidates:
-        if k in thresh_dict:
+        if k in thresh_dict and k != CANONICAL_KEY:
             return thresh_dict[k]
 
     # 2. PFAS alias – כולל גם פה נקודה/פסיק
@@ -369,16 +414,25 @@ def match_threshold(compound_name, thresh_dict):
     if aliased:
         a_key = norm(aliased)
         for k in [a_key, a_key.replace(".", ","), a_key.replace(",", ".")]:
-            if k in thresh_dict:
+            if k in thresh_dict and k != CANONICAL_KEY:
                 return thresh_dict[k]
 
-    # 3. ניסיון אחרון: להוריד סוגריים בסוף (…(CAS) וכו') ולהשוות
+    # 3. הורדת סוגריים בסוף (כבר נעשה בקאנון, אבל גם פה לשם ביטחון)
     stripped = re.sub(r"\s*\([A-Z0-9:_\-]+\)\s*$", "",
                       compound_name).strip().lower()
     for k, v in thresh_dict.items():
+        if k == CANONICAL_KEY:
+            continue
         k_s = re.sub(r"\s*\([A-Z0-9:_\-]+\)\s*$", "", k).strip().lower()
         if len(stripped) > 8 and stripped == k_s:
             return v
+
+    # 4. canonical compound name (מטפל 1,2,4 לפני/אחרי, ethene/ethylene וכו')
+    if canon_map:
+        ck = canonical_compound(compound_name)
+        hit = canon_map.get(ck)
+        if hit:
+            return hit
 
     return {}
 
@@ -409,6 +463,14 @@ def load_threshold_file(file_bytes):
             "Res_A_6p":  g(12),
             "Res_B":     g(13),
         }
+
+    # build canonical map once
+    canon_map = {}
+    for k, v in thresh.items():
+        ck = canonical_compound(k)
+        canon_map.setdefault(ck, v)
+    thresh[CANONICAL_KEY] = canon_map
+
     return thresh
 
 
@@ -437,6 +499,8 @@ def build_metals_thresh(thresh_dict, t1col):
     """Build {symbol: {vsl,tier1,cas}} using threshold file."""
     result = {}
     for key, v in thresh_dict.items():
+        if key == CANONICAL_KEY:
+            continue
         sym = THRESH_METAL_MAP.get(key)
         if sym and sym not in result:   # first match wins
             result[sym] = {
@@ -1042,7 +1106,7 @@ if not data_files:
 # ── LOAD THRESHOLDS ─────────────────────────────────────────────────────────────
 thresh_dict = load_threshold_file(thr_file.read())
 st.success(
-    f"✅ {len(thresh_dict)} ערכי סף | {land_use} | {aquifer} | {depth}"
+    f"✅ {len(thresh_dict) - 1} ערכי סף (לא כולל מפת קנון) | {land_use} | {aquifer} | {depth}"
 )
 
 # ── LOAD ALS FILES ──────────────────────────────────────────────────────────────
