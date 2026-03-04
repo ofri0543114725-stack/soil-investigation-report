@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 from openpyxl import Workbook, load_workbook
@@ -9,7 +10,7 @@ import re
 # ── BASIC PAGE SETUP ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="דוח סקר קרקע", layout="wide", page_icon="🧪")
 st.title("🧪 מערכת עיבוד תוצאות מעבדה")
-st.caption("v3.0 - TPH / Metals / PFAS / VOC+SVOC")
+st.caption("v3.1 - TPH / Metals / PFAS / VOC+SVOC (threshold match+depth label)")
 st.markdown("---")
 
 # ── STYLES ───────────────────────────────────────────────────────────────────────
@@ -123,7 +124,6 @@ def apply_sid_merge(ws, sid_rows, col=1):
 
 
 # ── METALS MAPS ──────────────────────────────────────────────────────────────────
-# ALS names -> symbol
 METAL_MAP = {
     "aluminium": "Al", "aluminum": "Al", "antimony": "Sb", "arsenic": "As",
     "barium": "Ba", "beryllium": "Be", "bismuth": "Bi", "boron": "B",
@@ -141,7 +141,6 @@ METALS_ORDER = [
     "Pb", "Li", "Mg", "Mn", "Hg", "Ni", "K", "Se", "Ag", "Na", "V", "Zn"
 ]
 
-# Threshold file names -> symbol
 THRESH_METAL_MAP = {
     "aluminum": "Al",
     "antimony (metallic)": "Sb",
@@ -190,7 +189,6 @@ THRESH_METAL_MAP = {
 }
 
 # ── VOC/SVOC ORDER (טמפלט ייחוס) ────────────────────────────────────────────────
-# List of (VOCs/SVOCs, group, compound name) in exact display order
 VOC_COMPOUND_ORDER = [
     # VOCs - Non-Halogenated VOCs (10)
     ("VOCs", "Non-Halogenated VOCs", "1.2.4-Trimethylbenzene"),
@@ -354,18 +352,34 @@ PFAS_ALIAS = {
 
 
 def match_threshold(compound_name, thresh_dict):
+    """
+    Match compound name from ALS/VOC list to threshold table.
+    מחזק מאוד את ההתאמה: נקודות/פסיקים, alias של PFAS, והורדת סוגריים.
+    """
     key = norm(compound_name)
-    if key in thresh_dict:
-        return thresh_dict[key]
+
+    # 1. ניסיון ישיר + וריאציות נקודה/פסיק (1.2.4 ↔ 1,2,4)
+    candidates = [key, key.replace(".", ","), key.replace(",", ".")]
+    for k in candidates:
+        if k in thresh_dict:
+            return thresh_dict[k]
+
+    # 2. PFAS alias – כולל גם פה נקודה/פסיק
     aliased = PFAS_ALIAS.get(key)
-    if aliased and aliased in thresh_dict:
-        return thresh_dict[aliased]
+    if aliased:
+        a_key = norm(aliased)
+        for k in [a_key, a_key.replace(".", ","), a_key.replace(",", ".")]:
+            if k in thresh_dict:
+                return thresh_dict[k]
+
+    # 3. ניסיון אחרון: להוריד סוגריים בסוף (…(CAS) וכו') ולהשוות
     stripped = re.sub(r"\s*\([A-Z0-9:_\-]+\)\s*$", "",
                       compound_name).strip().lower()
     for k, v in thresh_dict.items():
         k_s = re.sub(r"\s*\([A-Z0-9:_\-]+\)\s*$", "", k).strip().lower()
         if len(stripped) > 8 and stripped == k_s:
             return v
+
     return {}
 
 
@@ -486,7 +500,7 @@ def parse_als_file(file_bytes, filename):
             continue
 
         for ci, sname in col2sample.items():
-            sid, depth = parse_sample(sname)
+            sid, depth_val = parse_sample(sname)
             if sid is None:
                 continue
             val = row[ci] if ci < len(row) else None
@@ -508,7 +522,7 @@ def parse_als_file(file_bytes, filename):
                         lor_val = 0.0
                 records.append({
                     "sample_id":      sid,
-                    "depth":          depth,
+                    "depth":          depth_val,
                     "compound":       str(p).strip(),
                     "compound_lower": norm(p),
                     "unit":           str(u).strip() if u else "mg/kg",
@@ -617,14 +631,10 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
     prev_sid = None
     sid_rows = {}
 
-    for (sid, depth), v in sorted(
+    for (sid, depth_val), v in sorted(
         pivoted.items(),
         key=lambda x: (sort_key(x[0][0]), x[0][1] or 0)
     ):
-        dro_f = v["DRO_f"] or 0
-        oro_f = v["ORO_f"] or 0
-
-        # explicit total or computed
         if v["TOT"]:
             total_s = v["TOT"]
         else:
@@ -655,7 +665,7 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
         prev_sid = sid
 
         style_data(ws.cell(ri, 1, sid_val))
-        style_data(ws.cell(ri, 2, depth))
+        style_data(ws.cell(ri, 2, depth_val))
         style_data(ws.cell(ri, 3, v["DRO"]),  hl_dro)
         style_data(ws.cell(ri, 4, v["ORO"]),  hl_oro)
         style_data(ws.cell(ri, 5, total_s),   hl_total)
@@ -720,7 +730,7 @@ def write_metals_sheet(ws, df, thresh_dict, t1col, t1lbl):
     prev_sid = None
     sid_rows = {}
 
-    for (sid, depth), row_data in pt.iterrows():
+    for (sid, depth_val), row_data in pt.iterrows():
         if sid != prev_sid:
             sid_rows[sid] = []
         sid_rows[sid].append(ri)
@@ -728,7 +738,7 @@ def write_metals_sheet(ws, df, thresh_dict, t1col, t1lbl):
         prev_sid = sid
 
         style_data(ws.cell(ri, 1, sid_val))
-        style_data(ws.cell(ri, 2, depth))
+        style_data(ws.cell(ri, 2, depth_val))
         for ci, sym in enumerate(metals, 3):
             val = row_data.get(sym, "") or ""
             val = "" if str(val) == "nan" else str(val)
@@ -752,7 +762,6 @@ def write_metals_sheet(ws, df, thresh_dict, t1col, t1lbl):
 def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
     df = df.copy()
 
-    # build (sample_id, depth) pairs sorted sample ASC depth DESC
     pairs_pfas = sorted(
         df[["sample_id", "depth"]].drop_duplicates().values.tolist(),
         key=lambda x: (sort_key(x[0]), -(x[1] or 0))
@@ -766,10 +775,6 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
         except Exception:
             return v
 
-    # Cols A-E: שם התרכובת, CAS, VSL, TIER1, יחידות — merge rows 1+2
-    # Col F: LOR
-    # Col G: שם קידוח / עומק
-    # Col H+: samples
     fixed_hdrs = [
         "שם התרכובת", "CAS",
         "VSL [µg/kg]", f"{t1lbl} [µg/kg]",
@@ -792,10 +797,10 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
 
     prev_sid          = None
     sid_merge_start_p = {}
-    for ci, (sid, depth) in enumerate(pairs_pfas, 8):
+    for ci, (sid, depth_val) in enumerate(pairs_pfas, 8):
         sid_val = sid if sid != prev_sid else None
         style_hdr(ws.cell(1, ci, sid_val), HDR_BLUE_FILL)
-        style_hdr(ws.cell(2, ci, depth),   HDR_BLUE_FILL)
+        style_hdr(ws.cell(2, ci, depth_val),   HDR_BLUE_FILL)
         if sid != prev_sid:
             sid_merge_start_p[sid] = ci
         prev_sid = sid
@@ -828,9 +833,9 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
         style_data(ws.cell(row_i, 6, lor))
         style_data(ws.cell(row_i, 7, None))
 
-        for ci, (sid, depth) in enumerate(pairs_pfas, 8):
+        for ci, (sid, depth_val) in enumerate(pairs_pfas, 8):
             sub = df_c[(df_c["sample_id"] == sid) &
-                       (df_c["depth"] == depth)]
+                       (df_c["depth"] == depth_val)]
             rs  = sub.iloc[0]["result_str"] if not sub.empty else ""
             style_data(ws.cell(row_i, ci, rs),
                        check_exceed(rs, vsl, tier1))
@@ -847,16 +852,16 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
 def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
     df = df.copy()
 
-    # (sample_id, depth) pairs: sample ASC, depth DESC
     pairs = sorted(
         df[["sample_id", "depth"]].drop_duplicates().values.tolist(),
         key=lambda x: (sort_key(x[0]), -(x[1] or 0))
     )
 
     # ── HEADERS (rows 1–2) ────────────────────────────────────────────────────
-    # A=קבוצה, B=קבוצה, C=שם התרכובת, D=CAS, E=VSL, F=TIER1, G:H=יחידות, I=שם קידוח/עומק
+    # A=קבוצה, B=קבוצה, C=שם התרכובת, D=CAS, E=VSL, F=TIER 1 + depth,
+    # G:H=יחידות, I=שם קידוח/עומק
     for ci, h in enumerate(
-        ["קבוצה", "קבוצה", "שם התרכובת", "CAS", "VSL", t1lbl], 1
+        ["קבוצה", "קבוצה", "שם התרכובת", "CAS", "VSL", f"TIER 1\n{depth}"], 1
     ):
         ws.merge_cells(start_row=1, start_column=ci,
                        end_row=2, end_column=ci)
@@ -871,17 +876,16 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
     style_hdr(ws.cell(2, 9, "עומק"),      HDR_BLUE_FILL, sz=9)
 
     # sample columns from col 10
-    prev_sid     = None
+    prev_sid      = None
     sid_col_start = {}
-    for ci, (sid, depth) in enumerate(pairs, 10):
+    for ci, (sid, depth_val) in enumerate(pairs, 10):
         sid_val = sid if sid != prev_sid else None
         style_hdr(ws.cell(1, ci, sid_val), HDR_BLUE_FILL, sz=9)
-        style_hdr(ws.cell(2, ci, depth),   HDR_BLUE_FILL, sz=9)
+        style_hdr(ws.cell(2, ci, depth_val),   HDR_BLUE_FILL, sz=9)
         if sid != prev_sid:
             sid_col_start[sid] = ci
         prev_sid = sid
 
-    # merge row1 sample name across depth columns
     for sid, sc in sid_col_start.items():
         cols = [ci for ci, (s, _) in enumerate(pairs, 10) if s == sid]
         if len(cols) > 1:
@@ -899,7 +903,6 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
         k = norm(r["compound"])
         als_data.setdefault(k, {})[(r["sample_id"], r["depth"])] = r["result_str"]
 
-    # add dot<->comma variants
     for k in list(als_data.keys()):
         for alt in (k.replace(".", ","), k.replace(",", ".")):
             if alt not in als_data:
@@ -925,8 +928,8 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
 
         style_data(ws.cell(row_i, 9, None), sz=9)
 
-        for ci, (sid, depth) in enumerate(pairs, 10):
-            rs = cmp_data.get((sid, depth), "")
+        for ci, (sid, depth_val) in enumerate(pairs, 10):
+            rs = cmp_data.get((sid, depth_val), "")
             style_data(ws.cell(row_i, ci, rs),
                        check_exceed(rs, vsl, tier1),
                        sz=9)
@@ -971,7 +974,6 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
                                 wrap_text=True)
         c.border = thin_border()
 
-    # widths + freeze
     ws.column_dimensions["A"].width = 8
     ws.column_dimensions["B"].width = 22
     ws.column_dimensions["C"].width = 35
@@ -1128,7 +1130,7 @@ if not tph_df.empty:
                 pv[k]["TOT"]     = r["result_str"]
 
         out = []
-        for (sid, depth), v in sorted(pv.items()):
+        for (sid, depth_val), v in sorted(pv.items()):
             if v["TOT"]:
                 ts = v["TOT"]
             else:
@@ -1146,7 +1148,7 @@ if not tph_df.empty:
                       else f"{tf:.0f}")
             out.append({
                 "Sample":    sid,
-                "Depth":     depth,
+                "Depth":     depth_val,
                 "DRO":       v["DRO"],
                 "ORO":       v["ORO"],
                 "Total":     ts,
@@ -1173,7 +1175,6 @@ if not metals_df.empty:
     st.info(f"✅ Metals: {metals_df['sample_id'].nunique()} קידוחים")
 
 if not voc_df.empty:
-    # שם הלשונית – תוכל/י לשנות אם צריך שיהיה 1:1
     write_voc_sheet(wb_out.create_sheet("VOC+SVOC"),
                     voc_df, thresh_dict, t1col, t1lbl)
     st.info(f"✅ VOC+SVOC: {voc_df['sample_id'].nunique()} קידוחים")
