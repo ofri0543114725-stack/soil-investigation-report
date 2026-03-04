@@ -247,9 +247,13 @@ def parse_als_file(file_bytes, filename):
                 try: result=float(rs)
                 except: result=None
             if result is not None:
+                lor_val = None
+                if rs.startswith("<"):
+                    try: lor_val = float(rs[1:].strip())
+                    except: lor_val = 0.0
                 records.append({"sample_id":sid,"depth":depth,"compound":str(p).strip(),
                     "compound_lower":norm(p),"unit":str(u).strip() if u else "mg/kg",
-                    "lor":lor,"result":result,"result_str":rs,"group":group,"source":filename})
+                    "lor":lor,"result":result,"result_str":rs,"lor_val":lor_val,"group":group,"source":filename})
     if not records: return None, "לא נמצאו נתונים"
     return pd.DataFrame(records), None
 
@@ -284,31 +288,34 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
 
     # Header row 1 (no col C)
     for ci,h in enumerate(["שם קידוח","עומק","TPH DRO","TPH ORO","Total TPH"],1):
-        style_hdr(ws.cell(1,ci,h))
+        style_hdr(ws.cell(1,ci,h), HDR_BLUE_FILL)
     ws.merge_cells(start_row=1,start_column=1,end_row=5,end_column=1)
     ws.cell(1,1).value="שם קידוח"
     ws.cell(1,1).font=Font(bold=True,name="Arial",size=11)
+    ws.cell(1,1).fill=HDR_BLUE_FILL
     ws.cell(1,1).alignment=Alignment(horizontal="center",vertical="center",wrap_text=True)
     ws.cell(1,1).border=thin_border()
 
     sub_rows=["יחידות","CAS","VSL",t1lbl]
     sub_vals={"יחידות":"mg/kg","CAS":"C10-C40","VSL":vsl_tot,t1lbl:t1_tot}
     for ri,lbl in enumerate(sub_rows,2):
-        style_hdr(ws.cell(ri,2,lbl))
-        for ci in [3,4,5]: style_hdr(ws.cell(ri,ci,sub_vals[lbl]))
+        style_hdr(ws.cell(ri,2,lbl), HDR_BLUE_FILL)
+        for ci in [3,4,5]: style_hdr(ws.cell(ri,ci,sub_vals[lbl]), HDR_BLUE_FILL)
 
     # pivot — one row per (sample_id, depth)
     pivoted = {}
     for _,r in df.iterrows():
         k=(r["sample_id"],r["depth"])
-        if k not in pivoted: pivoted[k]={"DRO":"","ORO":"","TOT":"","DRO_f":None,"ORO_f":None,"TOT_f":None}
+        if k not in pivoted: pivoted[k]={"DRO":"","ORO":"","TOT":"","DRO_f":None,"ORO_f":None,"DRO_lor":None,"ORO_lor":None}
         c=r["compound_lower"]
         if is_dro(c) and not pivoted[k]["DRO"]:
             pivoted[k]["DRO"]=r["result_str"]; pivoted[k]["DRO_f"]=r["result"]
+            pivoted[k]["DRO_lor"]=r.get("lor_val")
         elif is_oro(c) and not pivoted[k]["ORO"]:
             pivoted[k]["ORO"]=r["result_str"]; pivoted[k]["ORO_f"]=r["result"]
+            pivoted[k]["ORO_lor"]=r.get("lor_val")
         elif is_total(c) and not pivoted[k]["TOT"]:
-            pivoted[k]["TOT"]=r["result_str"]; pivoted[k]["TOT_f"]=r["result"]
+            pivoted[k]["TOT"]=r["result_str"]
 
     ri=6; prev_sid=None; sid_rows={}
     for (sid,depth),v in sorted(pivoted.items(),key=lambda x:(sort_key(x[0][0]),x[0][1] or 0)):
@@ -318,11 +325,14 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
         if v["TOT"]:
             total_s = v["TOT"]
         else:
-            total_f = dro_f + oro_f
             dro_lor = v["DRO"] and str(v["DRO"]).startswith("<")
             oro_lor = v["ORO"] and str(v["ORO"]).startswith("<")
             dro_empty = not v["DRO"]
             oro_empty = not v["ORO"]
+            # use actual LOR number (not 0.0) for correct total
+            dro_num = v["DRO_lor"] if dro_lor and v["DRO_lor"] is not None else (v["DRO_f"] or 0)
+            oro_num = v["ORO_lor"] if oro_lor and v["ORO_lor"] is not None else (v["ORO_f"] or 0)
+            total_f = dro_num + oro_num
             if (dro_lor or dro_empty) and (oro_lor or oro_empty) and not (dro_empty and oro_empty):
                 total_s = f"<{total_f:.0f}"
             else:
@@ -406,9 +416,9 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
 
     fixed=["שם התרכובת","CAS","VSL [µg/kg]",f"{t1lbl}\n[µg/kg]","יחידות","LOR","שם הקידוח"]
     all_cols=fixed+samples
-    for ci,h in enumerate(all_cols,1): style_hdr(ws.cell(1,ci,h),HDR_CYAN_FILL)
-    style_hdr(ws.cell(2,7,"עומק"),HDR_CYAN_FILL)
-    for ci,sid in enumerate(samples,8): style_hdr(ws.cell(2,ci,sdepth.get(sid,"")),HDR_CYAN_FILL)
+    for ci,h in enumerate(all_cols,1): style_hdr(ws.cell(1,ci,h),HDR_BLUE_FILL)
+    style_hdr(ws.cell(2,7,"עומק"),HDR_BLUE_FILL)
+    for ci,sid in enumerate(samples,8): style_hdr(ws.cell(2,ci,sdepth.get(sid,"")),HDR_BLUE_FILL)
 
     for row_i,cmp in enumerate(df["compound"].unique(),3):
         df_c=df[df["compound"]==cmp]
