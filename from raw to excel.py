@@ -587,7 +587,7 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
         if v is None: return None
         try: return round(float(v)*1000,6)
         except: return v
-    fixed_hdrs=["שם התרכובת","CAS","VSL [µg/kg]",f"{t1lbl} [µg/kg]","יחידות"]
+    fixed_hdrs=["שם התרכובת","CAS","VSL [µg/kg]",t1lbl,"יחידות"]
     for ci,h in enumerate(fixed_hdrs,1):
         style_hdr(ws.cell(1,ci,h),HDR_BLUE_FILL)
         ws.merge_cells(start_row=1,start_column=ci,end_row=2,end_column=ci)
@@ -624,6 +624,7 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
     ws.column_dimensions["A"].width=50
     for ci in range(2,8): ws.column_dimensions[get_column_letter(ci)].width=13
     for ci in range(8,8+len(pairs_pfas)): ws.column_dimensions[get_column_letter(ci)].width=12
+    ws.row_dimensions[1].height=60
     ws.freeze_panes="H3"
 
 # ── VOC+SVOC SHEET ────────────────────────────────────────────────────────────────
@@ -705,7 +706,7 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
     ws.column_dimensions["G"].width=7;  ws.column_dimensions["H"].width=7
     ws.column_dimensions["I"].width=12
     for ci in range(10,10+len(pairs)): ws.column_dimensions[get_column_letter(ci)].width=10
-    ws.row_dimensions[1].height=20; ws.row_dimensions[2].height=15
+    ws.row_dimensions[1].height=60; ws.row_dimensions[2].height=15
     ws.freeze_panes="J3"
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────────
