@@ -8,7 +8,7 @@ import re
 
 st.set_page_config(page_title="דוח סקר קרקע", layout="wide", page_icon="🧪")
 st.title("🧪 מערכת עיבוד תוצאות מעבדה")
-st.caption("v3.7 - Generic parser: auto-detect columns, any format")
+st.caption("v3.8 - RTL sheets, number formatting, compound names left-aligned")
 st.markdown("---")
 
 YELLOW_FILL   = PatternFill("solid", fgColor="FFFF00")
@@ -26,12 +26,30 @@ def style_hdr(cell, fill=None, sz=11):
     cell.border    = thin_border()
     if fill: cell.fill = fill
 
-def style_data(cell, hl=None, sz=10):
+def fmt_number(val):
+    """הוסף פסיקים למספרים מעל 999"""
+    if val is None or val == "": return val
+    s = str(val).strip()
+    if s.startswith("<") or s.startswith(">"): return s
+    try:
+        f = float(s)
+        if abs(f) < 1000: return val
+        if "." in s:
+            decimals = len(s.split(".")[-1])
+            return f"{f:,.{decimals}f}"
+        return f"{int(f):,}"
+    except (ValueError, TypeError):
+        return val
+
+def style_data(cell, hl=None, sz=10, left_align=False):
     cell.font      = Font(bold=bool(hl), name="Arial", size=sz)
-    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    cell.alignment = Alignment(horizontal="left" if left_align else "center",
+                               vertical="center", wrap_text=True)
     cell.border    = thin_border()
     if   hl == "tier1": cell.fill = ORANGE_FILL
     elif hl == "vsl":   cell.fill = YELLOW_FILL
+    if cell.value is not None:
+        cell.value = fmt_number(cell.value)
 
 def norm(s):
     s = "" if s is None else str(s).strip().lower()
@@ -607,6 +625,7 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
     apply_sid_merge(ws,sid_rows,col=1)
     for col,w in zip("ABCDE",[14,10,16,16,16]): ws.column_dimensions[col].width=w
     ws.row_dimensions[1].height=15; ws.freeze_panes="A6"
+    ws.sheet_view.rightToLeft=True
 
 # ── METALS SHEET ──────────────────────────────────────────────────────────────────
 def write_metals_sheet(ws, df, thresh_dict, t1col, t1lbl):
@@ -643,6 +662,7 @@ def write_metals_sheet(ws, df, thresh_dict, t1col, t1lbl):
     ws.column_dimensions["A"].width=14; ws.column_dimensions["B"].width=10
     for ci in range(3,len(metals)+3): ws.column_dimensions[get_column_letter(ci)].width=11
     ws.freeze_panes="C6"
+    ws.sheet_view.rightToLeft=True
 
 # ── PFAS SHEET ────────────────────────────────────────────────────────────────────
 def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
@@ -680,7 +700,8 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
         vsl=to_ug(vsl_mg); tier1=to_ug(tier1_mg)
         unit=df_c.iloc[0]["unit"] if not df_c.empty else "µg/kg"
         lor=df_c.iloc[0]["lor"] if not df_c.empty else ""
-        for ci,val in enumerate([cmp,cas,vsl,tier1,unit],1): style_data(ws.cell(row_i,ci,val))
+        style_data(ws.cell(row_i,1,cmp),left_align=True)
+        for ci,val in enumerate([cas,vsl,tier1,unit],2): style_data(ws.cell(row_i,ci,val))
         ws.merge_cells(start_row=row_i,start_column=6,end_row=row_i,end_column=6)
         style_data(ws.cell(row_i,6,lor)); style_data(ws.cell(row_i,7,None))
         for ci,(sid,depth_val) in enumerate(pairs_pfas,8):
@@ -692,6 +713,7 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
     for ci in range(8,8+len(pairs_pfas)): ws.column_dimensions[get_column_letter(ci)].width=12
     ws.row_dimensions[1].height=60
     ws.freeze_panes="H3"
+    ws.sheet_view.rightToLeft=True
 
 # ── VOC+SVOC SHEET ────────────────────────────────────────────────────────────────
 def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
@@ -739,7 +761,7 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
         cmp_key=norm(cmp)
         cmp_data=als_data.get(cmp_key) or als_data.get(cmp_key.replace(".",",")) or {}
         style_data(ws.cell(row_i,1,vs),sz=9); style_data(ws.cell(row_i,2,grp),sz=9)
-        style_data(ws.cell(row_i,3,cmp),sz=9); style_data(ws.cell(row_i,4,cas),sz=9)
+        style_data(ws.cell(row_i,3,cmp),sz=9,left_align=True); style_data(ws.cell(row_i,4,cas),sz=9)
         style_data(ws.cell(row_i,5,vsl),sz=9); style_data(ws.cell(row_i,6,tier1),sz=9)
         ws.merge_cells(start_row=row_i,start_column=7,end_row=row_i,end_column=8)
         c=ws.cell(row_i,7,"mg/kg"); c.font=Font(name="Arial",size=9)
@@ -774,6 +796,7 @@ def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
     for ci in range(10,10+len(pairs)): ws.column_dimensions[get_column_letter(ci)].width=10
     ws.row_dimensions[1].height=60; ws.row_dimensions[2].height=15
     ws.freeze_panes="J3"
+    ws.sheet_view.rightToLeft=True
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────────
 st.sidebar.header("⚙️ הגדרות ערכי סף")
