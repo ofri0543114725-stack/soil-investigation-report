@@ -255,8 +255,25 @@ def parse_als_file(file_bytes, filename):
 
 # ── TPH SHEET ─────────────────────────────────────────────────────────────────
 def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
-    def is_dro(c): return "dro" in c or ("c10" in c and ("c28" in c or "c40" in c) and "oro" not in c)
-    def is_oro(c): return "oro" in c or ("c24" in c and "c40" in c)
+    def is_dro(c):
+        # explicit DRO in name, OR c10-c28 (without c40, without oro)
+        if "dro" in c: return True
+        if "oro" in c: return False
+        if "c10" in c and "c28" in c and "c40" not in c: return True
+        return False
+    def is_oro(c):
+        # explicit ORO in name, OR c24-c40 or c28-c40 (without dro)
+        if "oro" in c: return True
+        if "dro" in c: return False
+        if "c24" in c and "c40" in c: return True
+        if "c28" in c and "c40" in c: return True
+        return False
+    def is_total(c):
+        # c10-c40 total (no dro/oro) — use as Total TPH directly
+        if "dro" in c or "oro" in c: return False
+        if "c10" in c and "c40" in c: return True
+        if "total" in c and ("tph" in c or "hydrocarbon" in c): return True
+        return False
 
     vsl_d,t1_d,_ = get_thresh("C10 - C28 Fraction (DRO)", thresh_dict, t1col)
     vsl_o,t1_o,_ = get_thresh("C24 - C40 Fraction (ORO)", thresh_dict, t1col)
@@ -280,35 +297,40 @@ def write_tph_sheet(ws, df, thresh_dict, t1col, t1lbl):
         style_hdr(ws.cell(ri,2,lbl))
         for ci in [3,4,5]: style_hdr(ws.cell(ri,ci,sub_vals[lbl]))
 
-    # pivot
+    # pivot — one row per (sample_id, depth)
     pivoted = {}
     for _,r in df.iterrows():
         k=(r["sample_id"],r["depth"])
-        if k not in pivoted: pivoted[k]={"DRO":"","ORO":"","DRO_f":None,"ORO_f":None}
+        if k not in pivoted: pivoted[k]={"DRO":"","ORO":"","TOT":"","DRO_f":None,"ORO_f":None,"TOT_f":None}
         c=r["compound_lower"]
         if is_dro(c) and not pivoted[k]["DRO"]:
             pivoted[k]["DRO"]=r["result_str"]; pivoted[k]["DRO_f"]=r["result"]
         elif is_oro(c) and not pivoted[k]["ORO"]:
             pivoted[k]["ORO"]=r["result_str"]; pivoted[k]["ORO_f"]=r["result"]
+        elif is_total(c) and not pivoted[k]["TOT"]:
+            pivoted[k]["TOT"]=r["result_str"]; pivoted[k]["TOT_f"]=r["result"]
 
     ri=6; prev_sid=None; sid_rows={}
     for (sid,depth),v in sorted(pivoted.items(),key=lambda x:(sort_key(x[0][0]),x[0][1] or 0)):
         dro_f=v["DRO_f"] or 0; oro_f=v["ORO_f"] or 0
-        total_f=dro_f+oro_f
-        # total is <LOR only if BOTH are <LOR (non-empty) 
-        dro_lor = v["DRO"] and str(v["DRO"]).startswith("<")
-        oro_lor = v["ORO"] and str(v["ORO"]).startswith("<")
-        dro_empty = not v["DRO"]
-        oro_empty = not v["ORO"]
-        if (dro_lor or dro_empty) and (oro_lor or oro_empty) and not (dro_empty and oro_empty):
-            total_s = f"<{total_f:.0f}"
-        else:
-            total_s = f"{total_f:.0f}"
 
-        # color each column independently
-        hl_dro   = check_exceed(v["DRO"],   vsl_tot, t1_tot)
-        hl_oro   = check_exceed(v["ORO"],   vsl_tot, t1_tot)
-        hl_total = check_exceed(total_s,    vsl_tot, t1_tot)
+        # if we have an explicit total, use it; else compute from DRO+ORO
+        if v["TOT"]:
+            total_s = v["TOT"]
+        else:
+            total_f = dro_f + oro_f
+            dro_lor = v["DRO"] and str(v["DRO"]).startswith("<")
+            oro_lor = v["ORO"] and str(v["ORO"]).startswith("<")
+            dro_empty = not v["DRO"]
+            oro_empty = not v["ORO"]
+            if (dro_lor or dro_empty) and (oro_lor or oro_empty) and not (dro_empty and oro_empty):
+                total_s = f"<{total_f:.0f}"
+            else:
+                total_s = f"{total_f:.0f}"
+
+        hl_dro   = check_exceed(v["DRO"],  vsl_tot, t1_tot)
+        hl_oro   = check_exceed(v["ORO"],  vsl_tot, t1_tot)
+        hl_total = check_exceed(total_s,   vsl_tot, t1_tot)
 
         if sid!=prev_sid: sid_rows[sid]=[]
         sid_rows[sid].append(ri)
@@ -343,14 +365,14 @@ def write_metals_sheet(ws, df, thresh_dict, t1col, t1lbl):
     c.font=Font(bold=True,name="Arial",size=11); c.fill=HDR_BLUE_FILL
     c.alignment=Alignment(horizontal="center",vertical="center",wrap_text=True); c.border=thin_border()
 
-    for ci,h in enumerate(["עומק",None]+metals,2):
+    for ci,h in enumerate(["עומק"]+metals,2):
         style_hdr(ws.cell(1,ci,h),HDR_BLUE_FILL)
 
     for ri,lbl in enumerate(["יחידות","CAS","VSL",t1lbl],2):
         style_hdr(ws.cell(ri,2,lbl),HDR_BLUE_FILL)
-        for ci,sym in enumerate(metals,4):
+        for ci,sym in enumerate(metals,3):
             t=mt.get(sym,{})
-            val={"יחידות":"mg/kg","CAS":t.get("cas","-"),"VSL":t.get("vsl","-"),t1lbl:t.get("tier1","-")}[lbl]
+            val={"יחידות":"mg/kg","CAS":t.get("cas","-"),"VSL":t.get("vsl","-"),t1lbl:t.get("tier1","-")}.get(lbl,"-")
             style_hdr(ws.cell(ri,ci,val),HDR_BLUE_FILL)
 
     pt=df.pivot_table(index=["sample_id","depth"],columns="sym",values="result_str",aggfunc="first")
@@ -363,17 +385,16 @@ def write_metals_sheet(ws, df, thresh_dict, t1col, t1lbl):
         sid_val=sid if sid!=prev_sid else None; prev_sid=sid
         style_data(ws.cell(ri,1,sid_val))
         style_data(ws.cell(ri,2,depth))
-        style_data(ws.cell(ri,3,None))
-        for ci,sym in enumerate(metals,4):
+        for ci,sym in enumerate(metals,3):
             val=row_data.get(sym,"") or ""; val="" if str(val)=="nan" else str(val)
             hl=check_exceed(val,mt.get(sym,{}).get("vsl"),mt.get(sym,{}).get("tier1"))
             style_data(ws.cell(ri,ci,val),hl)
         ri+=1
 
     apply_sid_merge(ws,sid_rows,col=1)
-    ws.column_dimensions["A"].width=14; ws.column_dimensions["B"].width=10; ws.column_dimensions["C"].width=4
-    for ci in range(4,len(metals)+4): ws.column_dimensions[get_column_letter(ci)].width=11
-    ws.freeze_panes="D6"
+    ws.column_dimensions["A"].width=14; ws.column_dimensions["B"].width=10
+    for ci in range(3,len(metals)+3): ws.column_dimensions[get_column_letter(ci)].width=11
+    ws.freeze_panes="C6"
 
 # ── PFAS SHEET ────────────────────────────────────────────────────────────────
 def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
