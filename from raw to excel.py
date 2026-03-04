@@ -9,7 +9,7 @@ import re
 # ── BASIC PAGE SETUP ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="דוח סקר קרקע", layout="wide", page_icon="🧪")
 st.title("🧪 מערכת עיבוד תוצאות מעבדה")
-st.caption("v3.3 - Canonical threshold matching (numbers before/after name)")
+st.caption("v3.4 - Canonical threshold matching (spaces, dots/commas, cis/trans)")
 st.markdown("---")
 
 # ── STYLES ───────────────────────────────────────────────────────────────────────
@@ -356,8 +356,9 @@ def canonical_compound(name: str) -> str:
     """
     צורה קנונית:
     - מאחד ethene / ethylene / ethen.
-    - מאחד מצבים שבהם המספרים לפני/אחרי השם (1.2.4‑Trimethylbenzene
-      לעומת Trimethylbenzene, 1,2,4‑).
+    - מאחד מצבים שבהם יש/אין רווחים בתוך שם (Propylbenzene / Propyl benzene).
+    - מנרמל נקודה/פסיק במספרים (1.2.4 / 1,2,4).
+    - שומר על סדר המספרים (1,2,4-Trimethylbenzene == Trimethylbenzene, 1,2,4-).
     """
     s = norm(name)
 
@@ -365,18 +366,19 @@ def canonical_compound(name: str) -> str:
     s = s.replace("ethylene", "ethen")
     s = s.replace("ethene", "ethen")
 
-    # הורדת סוגריים בסוף
+    # remove trailing brackets content
     s = re.sub(r"\s*\([^)]+\)\s*$", "", s)
 
-    # digits sequence (אוספים את כל המספרים לפי סדר הופעה)
+    # digits: collect all sequences in order -> "1,2,4"
     nums = re.findall(r"\d+", s)
     num_part = ",".join(nums) if nums else ""
 
-    # מסירים ספרות וסימני הפרדה מהשם ובלבד שנשארו רק מילים
+    # base letters: remove digits + .,/- and THEN remove all spaces
     base_no_nums = re.sub(r"[0-9.,/\-]", " ", s)
-    base_no_nums = re.sub(r"\s+", " ", base_no_nums).strip()
+    base_no_nums = re.sub(r"\s+", "", base_no_nums)  # <‑‑ NO SPACES
     word_part = base_no_nums
 
+    # final canonical key
     canon = (num_part + " " + word_part).strip()
     return canon
 
@@ -388,7 +390,7 @@ def match_threshold(compound_name, thresh_dict):
     - נקודות/פסיקים
     - alias של PFAS
     - הסרת סוגריים
-    - התאמת צורה קנונית (מספרים+שם)
+    - צורה קנונית (מספרים+שם, בלי רווחים בתוך השם)
     """
     key = norm(compound_name)
     canon_map = thresh_dict.get(CANONICAL_KEY)
@@ -454,7 +456,7 @@ def load_threshold_file(file_bytes):
             "Res_B":     g(13),
         }
 
-    # canonical map
+    # canonical map once
     canon_map = {}
     for k, v in thresh.items():
         ck = canonical_compound(k)
@@ -1113,30 +1115,28 @@ voc_df    = dg([
     "nitro", "phthalate", "pesticide", "pcb", "other"
 ])
 
-if not tph_df.empty:
-    st.info(f"✅ TPH: {tph_df['sample_id'].nunique()} קידוחים")
-if not metals_df.empty:
-    st.info(f"✅ Metals: {metals_df['sample_id'].nunique()} קידוחים")
-if not voc_df.empty:
-    st.info(f"✅ VOC+SVOC: {voc_df['sample_id'].nunique()} קידוחים")
-if not pfas_df.empty:
-    st.info(f"✅ PFAS: {pfas_df['sample_id'].nunique()} קידוחים")
-
 wb_out = Workbook()
 wb_out.remove(wb_out.active)
 
 if not tph_df.empty:
     write_tph_sheet(wb_out.create_sheet("TPH"),
                     tph_df, thresh_dict, t1col, t1lbl)
+    st.info(f"✅ TPH: {tph_df['sample_id'].nunique()} קידוחים")
+
 if not metals_df.empty:
     write_metals_sheet(wb_out.create_sheet("Metals"),
                        metals_df, thresh_dict, t1col, t1lbl)
+    st.info(f"✅ Metals: {metals_df['sample_id'].nunique()} קידוחים")
+
 if not voc_df.empty:
     write_voc_sheet(wb_out.create_sheet("VOC+SVOC"),
                     voc_df, thresh_dict, t1col, t1lbl)
+    st.info(f"✅ VOC+SVOC: {voc_df['sample_id'].nunique()} קידוחים")
+
 if not pfas_df.empty:
     write_pfas_sheet(wb_out.create_sheet("PFAS"),
                      pfas_df, thresh_dict, t1col, t1lbl)
+    st.info(f"✅ PFAS: {pfas_df['sample_id'].nunique()} קידוחים")
 
 if not wb_out.sheetnames:
     wb_out.create_sheet("Results")
