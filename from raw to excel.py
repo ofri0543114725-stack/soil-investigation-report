@@ -7,7 +7,7 @@ import io, re
 
 st.set_page_config(page_title="דוח סקר קרקע", layout="wide", page_icon="🧪")
 st.title("🧪 מערכת עיבוד תוצאות מעבדה")
-st.caption("v2.5 - fix: is_oro/is_dro exact match only")
+st.caption("v2.6 - VOC groups + PFAS multi-depth + header merge")
 st.markdown("---")
 
 # ── STYLES ────────────────────────────────────────────────────────────────────
@@ -141,6 +141,167 @@ THRESH_METAL_MAP = {
     "sulphur":                      "S",
     "silicon":                      "Si",
 }
+
+
+# ── VOC/SVOC COMPOUND MAP (from reference file) ───────────────────────────────
+# Maps compound name (lowercased) -> {voc_svoc, group, cas}
+VOC_MAP = {
+    # VOCs - Non-Halogenated
+    "1.2.4-trimethylbenzene":        {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
+    "1.3.5-trimethylbenzene":        {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
+    "mtbe":                          {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
+    "styrene":                       {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
+    "n-butylbenzene":                {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
+    "n-propylbenzene":               {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
+    "isopropylbenzene":              {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
+    "acetone":                       {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
+    "2-butanone (mek)":              {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
+    "1.4-dioxane":                   {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
+    "1,4-dioxane":                   {"vs":"VOCs","grp":"Non-Halogenated VOCs"},
+    # VOCs - BTEX
+    "benzene":                       {"vs":"VOCs","grp":"BTEX"},
+    "toluene":                       {"vs":"VOCs","grp":"BTEX"},
+    "ethylbenzene":                  {"vs":"VOCs","grp":"BTEX"},
+    "sum of xylenes":                {"vs":"VOCs","grp":"BTEX"},
+    "xylenes":                       {"vs":"VOCs","grp":"BTEX"},
+    "o-xylene":                      {"vs":"VOCs","grp":"BTEX"},
+    "m-xylene":                      {"vs":"VOCs","grp":"BTEX"},
+    "p-xylene":                      {"vs":"VOCs","grp":"BTEX"},
+    "m,p-xylene":                    {"vs":"VOCs","grp":"BTEX"},
+    # VOCs - Halogenated
+    "1.1-dichloroethane":            {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "1,1-dichloroethane":            {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "1.1-dichloroethene":            {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "1,1-dichloroethene":            {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "1.2-dichloroethane":            {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "1,2-dichloroethane":            {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "1.2-dichloropropane":           {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "1,2-dichloropropane":           {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "chlorobenzene":                 {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "chloroform":                    {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "dichloromethane":               {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "tetrachloroethene":             {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "tetrachloromethane":            {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "trichloroethene":               {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "vinyl chloride":                {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "cis-1.2-dichloroethene":        {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "cis-1,2-dichloroethene":        {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "trans-1.2-dichloroethene":      {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "trans-1,2-dichloroethene":      {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "1.4-dichlorobenzene":           {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "1,4-dichlorobenzene":           {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "1.2-dichlorobenzene":           {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "1,2-dichlorobenzene":           {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "1.3-dichlorobenzene":           {"vs":"VOCs","grp":"Halogenated VOCs"},
+    "1,3-dichlorobenzene":           {"vs":"VOCs","grp":"Halogenated VOCs"},
+    # SVOCs - Phenols
+    "2.4-dimethylphenol":            {"vs":"SVOCs","grp":"Phenols & Naphtols"},
+    "2,4-dimethylphenol":            {"vs":"SVOCs","grp":"Phenols & Naphtols"},
+    "2-methylphenol":                {"vs":"SVOCs","grp":"Phenols & Naphtols"},
+    "3 & 4-methylphenol":            {"vs":"SVOCs","grp":"Phenols & Naphtols"},
+    "4-chloro-3-methylphenol":       {"vs":"SVOCs","grp":"Phenols & Naphtols"},
+    "phenol":                        {"vs":"SVOCs","grp":"Phenols & Naphtols"},
+    # SVOCs - PAHs
+    "acenaphthene":                  {"vs":"SVOCs","grp":"PAHs"},
+    "acenaphthylene":                {"vs":"SVOCs","grp":"PAHs"},
+    "anthracene":                    {"vs":"SVOCs","grp":"PAHs"},
+    "benz(a)anthracene":             {"vs":"SVOCs","grp":"PAHs"},
+    "benzo(a)pyrene":                {"vs":"SVOCs","grp":"PAHs"},
+    "benzo(b)fluoranthene":          {"vs":"SVOCs","grp":"PAHs"},
+    "benzo(g.h.i)perylene":          {"vs":"SVOCs","grp":"PAHs"},
+    "benzo(g,h,i)perylene":          {"vs":"SVOCs","grp":"PAHs"},
+    "benzo(k)fluoranthene":          {"vs":"SVOCs","grp":"PAHs"},
+    "chrysene":                      {"vs":"SVOCs","grp":"PAHs"},
+    "dibenz(a.h)anthracene":         {"vs":"SVOCs","grp":"PAHs"},
+    "dibenz(a,h)anthracene":         {"vs":"SVOCs","grp":"PAHs"},
+    "fluoranthene":                  {"vs":"SVOCs","grp":"PAHs"},
+    "fluorene":                      {"vs":"SVOCs","grp":"PAHs"},
+    "indeno(1.2.3.cd)pyrene":        {"vs":"SVOCs","grp":"PAHs"},
+    "indeno(1,2,3-cd)pyrene":        {"vs":"SVOCs","grp":"PAHs"},
+    "naphthalene":                   {"vs":"SVOCs","grp":"PAHs"},
+    "phenanthrene":                  {"vs":"SVOCs","grp":"PAHs"},
+    "pyrene":                        {"vs":"SVOCs","grp":"PAHs"},
+    # SVOCs - Anilines
+    "4-chloroaniline":               {"vs":"SVOCs","grp":"Anilines"},
+    "aniline":                       {"vs":"SVOCs","grp":"Anilines"},
+    "benzidine":                     {"vs":"SVOCs","grp":"Anilines"},
+    "diphenylamine":                 {"vs":"SVOCs","grp":"Anilines"},
+    # SVOCs - Aromatic Compounds
+    "1,1'-biphenyl":                 {"vs":"SVOCs","grp":"Aromatic Compounds"},
+    "1-chloronaphthalene":           {"vs":"SVOCs","grp":"Aromatic Compounds"},
+    "2-chloronaphthalene":           {"vs":"SVOCs","grp":"Aromatic Compounds"},
+    "2-methylnaphthalene":           {"vs":"SVOCs","grp":"Aromatic Compounds"},
+    "4-bromophenyl phenyl ether":    {"vs":"SVOCs","grp":"Aromatic Compounds"},
+    "4-chlorophenyl phenyl ether":   {"vs":"SVOCs","grp":"Aromatic Compounds"},
+    "carbazole":                     {"vs":"SVOCs","grp":"Aromatic Compounds"},
+    "dibenzofuran":                  {"vs":"SVOCs","grp":"Aromatic Compounds"},
+    # SVOCs - Alcohols
+    "benzyl alcohol":                {"vs":"SVOCs","grp":"Alcohols"},
+    # SVOCs - Aldehydes/Ketones
+    "6-caprolactam":                 {"vs":"SVOCs","grp":"Aldehydes / Ketones"},
+    "acetophenone":                  {"vs":"SVOCs","grp":"Aldehydes / Ketones"},
+    "isophorone":                    {"vs":"SVOCs","grp":"Aldehydes / Ketones"},
+    # SVOCs - Chlorophenols
+    "2-chlorophenol":                {"vs":"SVOCs","grp":"Chlorophenols"},
+    "2.4.5-trichlorophenol":         {"vs":"SVOCs","grp":"Chlorophenols"},
+    "2,4,5-trichlorophenol":         {"vs":"SVOCs","grp":"Chlorophenols"},
+    "2.4.6-trichlorophenol":         {"vs":"SVOCs","grp":"Chlorophenols"},
+    "2,4,6-trichlorophenol":         {"vs":"SVOCs","grp":"Chlorophenols"},
+    "2.4-dichlorophenol":            {"vs":"SVOCs","grp":"Chlorophenols"},
+    "2,4-dichlorophenol":            {"vs":"SVOCs","grp":"Chlorophenols"},
+    "2.6-dichlorophenol":            {"vs":"SVOCs","grp":"Chlorophenols"},
+    "2,6-dichlorophenol":            {"vs":"SVOCs","grp":"Chlorophenols"},
+    "pentachlorophenol":             {"vs":"SVOCs","grp":"Chlorophenols"},
+    # SVOCs - Nitroaromatic
+    "2.4-dinitrophenol":             {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    "2,4-dinitrophenol":             {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    "2.4-dinitrotoluene":            {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    "2,4-dinitrotoluene":            {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    "2-nitroaniline":                {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    "2-nitrophenol":                 {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    "2.6-dinitrotoluene":            {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    "2,6-dinitrotoluene":            {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    "3-nitroaniline":                {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    "4.6-dinitro-2-methylphenol":    {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    "4,6-dinitro-2-methylphenol":    {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    "4-nitroaniline":                {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    "4-nitrophenol":                 {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    "nitrobenzene":                  {"vs":"SVOCs","grp":"Nitroaromatic Compounds"},
+    # SVOCs - Chlorinated Hydrocarbons
+    "bis(2-chloroethoxy)methane":    {"vs":"SVOCs","grp":"Chlorinated Hydrocarbons"},
+    "bis(2-chloroethyl)ether":       {"vs":"SVOCs","grp":"Chlorinated Hydrocarbons"},
+    "bis(2-chloroisopropyl)ether":   {"vs":"SVOCs","grp":"Chlorinated Hydrocarbons"},
+    # SVOCs - Nitrosoamines
+    "n-nitrosodi-n-propylamine":     {"vs":"SVOCs","grp":"Nitrosoamines"},
+    # SVOCs - Pesticides
+    "dinoseb":                       {"vs":"SVOCs","grp":"Pesticides"},
+    # SVOCs - Phthalates
+    "bis(2-ethylhexyl)phthalate":    {"vs":"SVOCs","grp":"Phthalates"},
+    "butyl benzyl phthalate":        {"vs":"SVOCs","grp":"Phthalates"},
+    "di-n-butyl phthalate":          {"vs":"SVOCs","grp":"Phthalates"},
+    "di-n-octyl phthalate":          {"vs":"SVOCs","grp":"Phthalates"},
+    "diethyl phthalate":             {"vs":"SVOCs","grp":"Phthalates"},
+    "dimethyl phthalate":            {"vs":"SVOCs","grp":"Phthalates"},
+}
+
+# VOC group order for display (bottom to top = higher depth first in output)
+VOC_GROUP_ORDER = [
+    ("VOCs",  "Non-Halogenated VOCs"),
+    ("VOCs",  "BTEX"),
+    ("VOCs",  "Halogenated VOCs"),
+    ("SVOCs", "Phenols & Naphtols"),
+    ("SVOCs", "PAHs"),
+    ("SVOCs", "Anilines"),
+    ("SVOCs", "Aromatic Compounds"),
+    ("SVOCs", "Alcohols"),
+    ("SVOCs", "Aldehydes / Ketones"),
+    ("SVOCs", "Chlorophenols"),
+    ("SVOCs", "Nitroaromatic Compounds"),
+    ("SVOCs", "Chlorinated Hydrocarbons"),
+    ("SVOCs", "Nitrosoamines"),
+    ("SVOCs", "Pesticides"),
+    ("SVOCs", "Phthalates"),
+]
 
 # ── PFAS ALIAS ────────────────────────────────────────────────────────────────
 PFAS_ALIAS = {
@@ -411,62 +572,141 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
     for _,r in df.iterrows():
         if r["sample_id"] not in sdepth: sdepth[r["sample_id"]]=r["depth"]
 
-    fixed=["שם התרכובת","CAS","VSL [µg/kg]",f"{t1lbl}\n[µg/kg]","יחידות","LOR","שם הקידוח"]
-    all_cols=fixed+samples
-    for ci,h in enumerate(all_cols,1): style_hdr(ws.cell(1,ci,h),HDR_BLUE_FILL)
-    style_hdr(ws.cell(2,7,"עומק"),HDR_BLUE_FILL)
-    for ci,sid in enumerate(samples,8): style_hdr(ws.cell(2,ci,sdepth.get(sid,"")),HDR_BLUE_FILL)
+    # build (sample_id, depth) pairs sorted sample ASC depth DESC
+    pairs_pfas = sorted(
+        df[["sample_id","depth"]].drop_duplicates().values.tolist(),
+        key=lambda x: (sort_key(x[0]), -(x[1] or 0))
+    )
+
+    def to_ug(v):
+        if v is None: return None
+        try: return round(float(v)*1000, 6)
+        except: return v
+
+    # Cols A-E: שם התרכובת, CAS, VSL, TIER1, יחידות — merge rows 1+2
+    # Col F: LOR (not merged)
+    # Col G: שם קידוח row1, עומק row2 (not merged)
+    # Col H+: samples
+    fixed_hdrs = ["שם התרכובת","CAS","VSL [µg/kg]",f"{t1lbl} [µg/kg]","יחידות"]
+    for ci,h in enumerate(fixed_hdrs,1):
+        style_hdr(ws.cell(1,ci,h), HDR_BLUE_FILL)
+        ws.merge_cells(start_row=1,start_column=ci,end_row=2,end_column=ci)
+        ws.cell(1,ci).alignment=Alignment(horizontal="center",vertical="center",wrap_text=True)
+        ws.cell(1,ci).fill=HDR_BLUE_FILL; ws.cell(1,ci).border=thin_border()
+    style_hdr(ws.cell(1,6,"LOR"),        HDR_BLUE_FILL)
+    style_hdr(ws.cell(2,6,"[µg/kg]"),    HDR_BLUE_FILL)
+    style_hdr(ws.cell(1,7,"שם קידוח"),   HDR_BLUE_FILL)
+    style_hdr(ws.cell(2,7,"עומק"),       HDR_BLUE_FILL)
+
+    # sample headers: merge row1 for same sid across depths
+    prev_sid=None; sid_merge_start_p={}
+    for ci,(sid,depth) in enumerate(pairs_pfas,8):
+        sid_val = sid if sid!=prev_sid else None
+        style_hdr(ws.cell(1,ci,sid_val), HDR_BLUE_FILL)
+        style_hdr(ws.cell(2,ci,depth),   HDR_BLUE_FILL)
+        if sid!=prev_sid: sid_merge_start_p[sid]=ci
+        prev_sid=sid
+    for sid, start_ci in sid_merge_start_p.items():
+        cols_p = [ci for ci,(s,_) in enumerate(pairs_pfas,8) if s==sid]
+        if len(cols_p)>1:
+            ws.merge_cells(start_row=1,start_column=start_ci,end_row=1,end_column=cols_p[-1])
+            ws.cell(1,start_ci).alignment=Alignment(horizontal="center",vertical="center")
+            ws.cell(1,start_ci).fill=HDR_BLUE_FILL; ws.cell(1,start_ci).border=thin_border()
 
     for row_i,cmp in enumerate(df["compound"].unique(),3):
         df_c=df[df["compound"]==cmp]
         vsl_mg,tier1_mg,cas=get_thresh(cmp,thresh_dict,t1col)
-        # convert mg/kg -> µg/kg (×1000)
-        def to_ug(v):
-            if v is None: return None
-            try: return round(float(v)*1000, 6)
-            except: return v
-        vsl   = to_ug(vsl_mg)
-        tier1 = to_ug(tier1_mg)
-        unit = df_c.iloc[0]["unit"] if not df_c.empty else "µg/kg"
-        lor  = df_c.iloc[0]["lor"]  if not df_c.empty else ""
-        for ci,val in enumerate([cmp,cas,vsl,tier1,unit,lor,None],1): style_data(ws.cell(row_i,ci,val))
-        for ci,sid in enumerate(samples,8):
-            rs=df_c[df_c["sample_id"]==sid].iloc[0]["result_str"] if not df_c[df_c["sample_id"]==sid].empty else ""
-            style_data(ws.cell(row_i,ci,rs),check_exceed(rs,vsl,tier1))
+        vsl=to_ug(vsl_mg); tier1=to_ug(tier1_mg)
+        unit=df_c.iloc[0]["unit"] if not df_c.empty else "µg/kg"
+        lor=df_c.iloc[0]["lor"]  if not df_c.empty else ""
+        # col E+F merged = LOR value
+        for ci,val in enumerate([cmp,cas,vsl,tier1,unit],1): style_data(ws.cell(row_i,ci,val))
+        ws.merge_cells(start_row=row_i,start_column=6,end_row=row_i,end_column=6)
+        style_data(ws.cell(row_i,6,lor))
+        style_data(ws.cell(row_i,7,None))
+        for ci,(sid,depth) in enumerate(pairs_pfas,8):
+            sub=df_c[(df_c["sample_id"]==sid)&(df_c["depth"]==depth)]
+            rs=sub.iloc[0]["result_str"] if not sub.empty else ""
+            style_data(ws.cell(row_i,ci,rs), check_exceed(rs,vsl,tier1))
 
     ws.column_dimensions["A"].width=50
-    for ci in range(2,len(all_cols)+1): ws.column_dimensions[get_column_letter(ci)].width=13
+    for ci in range(2,8): ws.column_dimensions[get_column_letter(ci)].width=13
+    for ci in range(8, 8+len(pairs_pfas)): ws.column_dimensions[get_column_letter(ci)].width=12
     ws.freeze_panes="H3"
 
 # ── VOC SHEET ─────────────────────────────────────────────────────────────────
 def write_voc_sheet(ws, df, thresh_dict, t1col, t1lbl):
     df=df.copy()
-    samples=sorted(df["sample_id"].unique(),key=sort_key)
-    sdepth={}
-    for _,r in df.iterrows():
-        if r["sample_id"] not in sdepth: sdepth[r["sample_id"]]=r["depth"]
 
+    # build (sample_id, depth) pairs sorted by sample ASC, depth DESC (bottom=shallow)
+    pairs = sorted(
+        df[["sample_id","depth"]].drop_duplicates().values.tolist(),
+        key=lambda x: (sort_key(x[0]), -(x[1] or 0))
+    )
+
+    # headers row 1-2
     fixed=["קבוצה","קבוצה","שם התרכובת","CAS","VSL",t1lbl,"יחידות","שם קידוח"]
-    all_cols=fixed+samples
-    for ci,h in enumerate(all_cols,1): style_hdr(ws.cell(1,ci,h),sz=9)
-    style_hdr(ws.cell(2,8,"עומק"),sz=9)
-    for ci,sid in enumerate(samples,9): style_hdr(ws.cell(2,ci,sdepth.get(sid,"")),sz=9)
+    for ci,h in enumerate(fixed,1): style_hdr(ws.cell(1,ci,h), HDR_BLUE_FILL, sz=9)
+    # merge rows 1-2 for cols A-G
+    for ci in range(1,8):
+        ws.merge_cells(start_row=1,start_column=ci,end_row=2,end_column=ci)
+        ws.cell(1,ci).alignment=Alignment(horizontal="center",vertical="center",wrap_text=True)
+        ws.cell(1,ci).fill=HDR_BLUE_FILL; ws.cell(1,ci).border=thin_border()
+    # col H: "שם קידוח" row1, "עומק" row2 - NOT merged
+    style_hdr(ws.cell(1,8,"שם קידוח"), HDR_BLUE_FILL, sz=9)
+    style_hdr(ws.cell(2,8,"עומק"),     HDR_BLUE_FILL, sz=9)
 
-    seen={}
-    for _,r in df.iterrows():
-        if r["compound"] not in seen: seen[r["compound"]]=r["group"]
-    for row_i,(cmp,grp) in enumerate(seen.items(),3):
-        df_c=df[df["compound"]==cmp]
-        vsl,tier1,cas=get_thresh(cmp,thresh_dict,t1col)
-        unit=df_c.iloc[0]["unit"] if not df_c.empty else "mg/kg"
-        for ci,val in enumerate([None,grp,cmp,cas,vsl,tier1,unit,None],1): style_data(ws.cell(row_i,ci,val),sz=9)
-        for ci,sid in enumerate(samples,9):
-            rs=df_c[df_c["sample_id"]==sid].iloc[0]["result_str"] if not df_c[df_c["sample_id"]==sid].empty else ""
-            style_data(ws.cell(row_i,ci,rs),check_exceed(rs,vsl,tier1),sz=9)
+    # sample columns: one per (sid, depth)
+    prev_sid=None; sid_merge_start={}
+    for ci,(sid,depth) in enumerate(pairs, 9):
+        sid_val = sid if sid!=prev_sid else None
+        style_hdr(ws.cell(1,ci,sid_val), HDR_BLUE_FILL, sz=9)
+        style_hdr(ws.cell(2,ci,depth),   HDR_BLUE_FILL, sz=9)
+        if sid!=prev_sid: sid_merge_start[sid]=ci
+        prev_sid=sid
+    # merge sample name row1 across its depth columns
+    for sid, start_ci in sid_merge_start.items():
+        cols = [ci for ci,(s,_) in enumerate(pairs,9) if s==sid]
+        if len(cols)>1:
+            ws.merge_cells(start_row=1,start_column=start_ci,end_row=1,end_column=cols[-1])
+            ws.cell(1,start_ci).alignment=Alignment(horizontal="center",vertical="center")
+            ws.cell(1,start_ci).fill=HDR_BLUE_FILL; ws.cell(1,start_ci).border=thin_border()
 
-    ws.column_dimensions["A"].width=8; ws.column_dimensions["B"].width=18
+    # build ordered compound list using VOC_MAP
+    def get_voc_info(cmp):
+        k=norm(cmp)
+        info=VOC_MAP.get(k,{})
+        return info.get("vs","Other"), info.get("grp","Other")
+
+    # collect unique compounds ordered by VOC_GROUP_ORDER
+    all_cmps = list(df["compound"].unique())
+    def cmp_sort_key(c):
+        vs,grp = get_voc_info(c)
+        try:
+            gi = next(i for i,(v,g) in enumerate(VOC_GROUP_ORDER) if v==vs and g==grp)
+        except: gi=999
+        return (gi, c)
+    all_cmps.sort(key=cmp_sort_key)
+
+    # write data rows starting row 3
+    for row_i, cmp in enumerate(all_cmps, 3):
+        vs, grp = get_voc_info(cmp)
+        df_c = df[df["compound"]==cmp]
+        vsl,tier1,cas = get_thresh(cmp, thresh_dict, t1col)
+        unit = df_c.iloc[0]["unit"] if not df_c.empty else "mg/kg"
+        for ci,val in enumerate([vs,grp,cmp,cas,vsl,tier1,unit,None],1):
+            style_data(ws.cell(row_i,ci,val),sz=9)
+        for ci,(sid,depth) in enumerate(pairs,9):
+            sub = df_c[(df_c["sample_id"]==sid)&(df_c["depth"]==depth)]
+            rs = sub.iloc[0]["result_str"] if not sub.empty else ""
+            style_data(ws.cell(row_i,ci,rs), check_exceed(rs,vsl,tier1), sz=9)
+
+    ws.column_dimensions["A"].width=8; ws.column_dimensions["B"].width=22
     ws.column_dimensions["C"].width=35; ws.column_dimensions["D"].width=12
-    for ci in range(5,len(all_cols)+1): ws.column_dimensions[get_column_letter(ci)].width=11
+    ws.column_dimensions["E"].width=10; ws.column_dimensions["F"].width=12
+    ws.column_dimensions["G"].width=9;  ws.column_dimensions["H"].width=12
+    for ci in range(9, 9+len(pairs)): ws.column_dimensions[get_column_letter(ci)].width=10
+    ws.row_dimensions[1].height=20; ws.row_dimensions[2].height=15
     ws.freeze_panes="I3"
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
