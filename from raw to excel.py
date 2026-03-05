@@ -1673,21 +1673,34 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
 
     def add_rtl_run(para, text, bold=False, size_heb=13, size_eng=11,
                     color_hex=None, underline=False):
-        """מוסיף run עם הגופן הנכון לפי שפה"""
+        """מוסיף run עם הגופן הנכון לפי שפה + CS font + RTL"""
         if not text: return
         run = para.add_run(text)
         run.bold = bold
         run.underline = underline
         if color_hex:
             run.font.color.rgb = RGBColor.from_string(color_hex)
-        if has_heb(text):
-            run.font.name = "David"
-            run.font.size = Pt(size_heb)
-        else:
-            run.font.name = "Times New Roman"
-            run.font.size = Pt(size_eng)
+        use_heb = has_heb(text)
+        fname = "David" if use_heb else "Times New Roman"
+        fsize = Pt(size_heb) if use_heb else Pt(size_eng)
+        run.font.size = fsize
+        # Set ALL font slots including Complex Script
         rPr = run._r.get_or_add_rPr()
-        rtl_r = OxmlElement('w:rtl'); rPr.append(rtl_r)
+        for old in rPr.findall(qn('w:rFonts')): rPr.remove(old)
+        rFonts = OxmlElement('w:rFonts')
+        rFonts.set(qn('w:ascii'),    fname)
+        rFonts.set(qn('w:hAnsi'),   fname)
+        rFonts.set(qn('w:cs'),      fname)  # Critical for Hebrew!
+        rFonts.set(qn('w:eastAsia'), fname)
+        rPr.insert(0, rFonts)
+        # Set CS font size
+        for old in rPr.findall(qn('w:szCs')): rPr.remove(old)
+        szCs = OxmlElement('w:szCs')
+        szCs.set(qn('w:val'), str(int(fsize.pt * 2)))
+        rPr.append(szCs)
+        # RTL run direction
+        for old in rPr.findall(qn('w:rtl')): rPr.remove(old)
+        rPr.append(OxmlElement('w:rtl'))
         return run
 
     def make_rtl_para(doc, align='center'):
@@ -1791,30 +1804,44 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
                     val  = xl_c.value if xl_c else ""
                     bg   = get_color(xl_c) if xl_c else None
                     if bg is None: bg = WHITE
+                    is_exceed = bg in (YELLOW, ORANGE)
                     if bg == YELLOW: has_yel = True
                     if bg == ORANGE: has_org = True
-                    write_cell(table.cell(row_idx,ci), str(val) if val is not None else "", bg=bg)
+                    write_cell(table.cell(row_idx,ci), str(val) if val is not None else "", bg=bg, bold=is_exceed)
                 ri += 1
 
-        # מקרא - ימין, אותו עמוד כמו הטבלה
+        # מקרא - ימין, אותו עמוד
         lp = make_rtl_para(doc, 'right')
         lp.paragraph_format.space_before = Pt(4)
-        # keep_with_next=False כאן כי הוא אחרון לפני מעבר עמוד
+        lp.paragraph_format.space_after  = Pt(0)
+
+        def leg_highlight_run(para, word, bg_hex, rest_text):
+            """מילה עם הדגשת רקע + שאר הטקסט"""
+            # ■
+            add_rtl_run(para, "■ ", color_hex=bg_hex, size_heb=10, size_eng=10)
+            # מילה עם רקע צבעוני
+            r = para.add_run(word)
+            r.bold = True
+            r.font.size = Pt(10)
+            rPr = r._r.get_or_add_rPr()
+            rFonts = OxmlElement('w:rFonts')
+            rFonts.set(qn('w:ascii'), 'David'); rFonts.set(qn('w:hAnsi'), 'David')
+            rFonts.set(qn('w:cs'), 'David'); rPr.insert(0, rFonts)
+            szCs = OxmlElement('w:szCs'); szCs.set(qn('w:val'), '20'); rPr.append(szCs)
+            rPr.append(OxmlElement('w:rtl'))
+            # highlight background
+            hl = OxmlElement('w:highlight')
+            hl.set(qn('w:val'), 'yellow' if bg_hex == 'FFFF00' else 'orange')
+            rPr.append(hl)
+            # rest
+            add_rtl_run(para, rest_text, size_heb=10, size_eng=10)
+
         if has_yel:
-            add_rtl_run(lp, "■ ", color_hex="CCCC00", size_heb=10, size_eng=10)
-            add_rtl_run(lp, "בצהוב", bold=True, color_hex="CCCC00", size_heb=10, size_eng=10)
-            add_rtl_run(lp, " - חריגה מערך הסף VSL", size_heb=10, size_eng=10)
+            leg_highlight_run(lp, "בצהוב", "FFFF00", " - חריגה מערך הסף VSL")
         if has_yel and has_org:
             add_rtl_run(lp, "     ", size_heb=10, size_eng=10)
         if has_org:
-            add_rtl_run(lp, "■ ", color_hex="FFC000", size_heb=10, size_eng=10)
-            add_rtl_run(lp, "בכתום", bold=True, color_hex="FFC000", size_heb=10, size_eng=10)
-            add_rtl_run(lp, " - חריגה מערך הסף TIER 1", size_heb=10, size_eng=10)
-        # אם אין חריגות - פסקה ריקה לשמור מקום
-        if not has_yel and not has_org:
-            ep = doc.add_paragraph()
-            ep.paragraph_format.space_before = Pt(0)
-            ep.paragraph_format.space_after  = Pt(0)
+            leg_highlight_run(lp, "בכתום", "FFC000", " - חריגה מערך הסף TIER 1")
 
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     return buf.getvalue()
