@@ -1534,12 +1534,15 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         drills.append((current_sid, current_group))
 
     # ── כמה שורות נכנסות בדף ────────────────────────────────────────────────
-    HDR_H   = 420
-    ROW_H   = 320
-    TITLE_H = 600
-    LEG_H   = 450
-    avail   = page_h - 2*MARGIN - TITLE_H - LEG_H - N_HDR*HDR_H
-    rows_pp = max(6, int(avail / ROW_H))
+    # שורות לדף - ערך קבוע ובטוח לפי גודל דף
+    if page_size == "A4" and not landscape:
+        rows_pp = 30
+    elif page_size == "A4" and landscape:
+        rows_pp = 18
+    elif page_size == "Tabloid" and not landscape:
+        rows_pp = 42
+    else:  # Tabloid landscape
+        rows_pp = 28
 
     # ── חלק קידוחים לדפים - לא לפצל קידוח בין דפים ─────────────────────────
     pages = []
@@ -1686,6 +1689,7 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         bidi = OxmlElement('w:bidi'); pPr.append(bidi)
         p.paragraph_format.space_before = Pt(0)
         p.paragraph_format.space_after  = Pt(4)
+        p.paragraph_format.keep_with_next = True  # כותרת נשארת עם הטבלה
         run = p.add_run(title)
         run.bold = True; run.underline = True
         run.font.name = "David"; run.font.size = Pt(13)
