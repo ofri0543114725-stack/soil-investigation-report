@@ -1982,11 +1982,6 @@ with tab_excel:
 
 
 with tab_word:
-    # הסתר sidebar בטאב Word
-    st.markdown("""<style>
-        [data-testid="stSidebar"] { display: none !important; }
-    </style>""", unsafe_allow_html=True)
-
     st.header("📄 יצוא דוח Word")
     st.caption("העלה קובץ Excel מעובד מטאב Excel, בחר מספר טבלה וצור דוח Word")
     st.markdown("---")
