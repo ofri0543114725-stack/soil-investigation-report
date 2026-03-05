@@ -1837,7 +1837,7 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         sp = doc.add_paragraph()
         sp.paragraph_format.space_before = Pt(0)
         sp.paragraph_format.space_after  = Pt(0)
-        sp.paragraph_format.line_spacing = Twips(SPACER_H)
+        sp.paragraph_format.line_spacing = Pt(19.5)  # 1.5 שורות של 13pt
         sp.paragraph_format.keep_with_next = True
 
         # טבלה
@@ -2213,8 +2213,7 @@ def build_metals_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
         sp_p.paragraph_format.space_before = Pt(0)
         sp_p.paragraph_format.space_after  = Pt(0)
         sp_p.paragraph_format.keep_with_next = True
-        from docx.shared import Twips as _Twips
-        sp_p.paragraph_format.line_spacing = _Twips(SPACER_H)
+        sp_p.paragraph_format.line_spacing = Pt(19.5)  # 1.5 שורות של 13pt
 
         # ── טבלה ─────────────────────────────────────────────────────────────
         n_rows_table = N_HDR + len(page_rows)
@@ -2272,8 +2271,7 @@ def build_metals_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
             if hi == 0:
                 vm.set(qn('w:val'), 'restart')
             tcPr.append(vm)
-        # נקה טקסט מתא עומק שורה 1
-        p = table.cell(1, 1).paragraphs[0]; p.clear()
+        # תא עומק שורה 1 כבר ריק מה-Excel (אין יחידות לעומק)
 
         # ── שורות נתונים ─────────────────────────────────────────────────────
         has_yel = False; has_org = False
