@@ -1509,6 +1509,7 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
 
     vsl_vals   = [cv(3,2), cv(3,3), cv(3,4)]
     tier1_vals = [cv(4,2), cv(4,3), cv(4,4)]
+    t1lbl      = cv(4,1) or t1lbl  # קרא label מהאקסל
     for i in range(3):
         if not vsl_vals[i]:
             vsl_vals[i] = next((v for v in vsl_vals if v), "350")
@@ -1988,6 +1989,12 @@ def build_metals_word(xl_file_bytes, table_num, page_size="A3", landscape=True, 
 
     n_cols = len(xl_rows[0])  # מספר עמודות כולל שם קידוח + עומק + מתכות
 
+    # קרא t1lbl מהאקסל (שורה 4, עמודה 1 = תווית TIER 1)
+    if len(xl_rows) > 4 and len(xl_rows[4]) > 1:
+        xl_t1 = xl_rows[4][1].value
+        if xl_t1 and str(xl_t1).strip():
+            t1lbl = str(xl_t1).strip()
+
     def get_color(cell):
         try:
             fill = cell.fill
@@ -2278,9 +2285,21 @@ def build_metals_word(xl_file_bytes, table_num, page_size="A3", landscape=True, 
 
         # ── שורות נתונים ─────────────────────────────────────────────────────
         has_yel = False; has_org = False
+        # בנה מיפוי: כמה שורות יש לכל קידוח (לצורך vMerge)
+        drill_row_counts = {}
+        for sid, _ in page_rows:
+            drill_row_counts[sid] = drill_row_counts.get(sid, 0) + 1
+        drill_start = {}  # sid → row_idx ראשון
+        drill_seen  = {}  # sid → כמה שורות כבר נכתבו
+
         for ri, (sid, xl_row) in enumerate(page_rows):
             row_idx = N_HDR + ri
             set_row_height(table.rows[row_idx]._tr, ROW_H)
+
+            # vMerge על שם קידוח אם יש כמה שורות לאותו קידוח
+            n_rows_for_drill = drill_row_counts.get(sid, 1)
+            seen = drill_seen.get(sid, 0)
+            drill_seen[sid] = seen + 1
 
             for ci in range(n_data_cols):
                 xl_c = xl_row[ci] if ci < len(xl_row) else None
@@ -2290,8 +2309,22 @@ def build_metals_word(xl_file_bytes, table_num, page_size="A3", landscape=True, 
                 is_exceed = bg in (YELLOW, ORANGE)
                 if bg == YELLOW: has_yel = True
                 if bg == ORANGE: has_org = True
-                write_cell(table.cell(row_idx, ci), str(val) if val is not None else "",
-                           bg=bg, bold=is_exceed, size_heb=9, size_eng=7)
+                # col0 = שם קידוח: הצג רק בשורה הראשונה, מזג אם יש כמה
+                if ci == 0:
+                    cell_val = str(val) if val is not None else ""
+                    write_cell(table.cell(row_idx, ci), cell_val,
+                               bg=bg, bold=is_exceed, size_heb=9, size_eng=7)
+                    if n_rows_for_drill > 1:
+                        tc   = table.cell(row_idx, ci)._tc
+                        tcPr = tc.get_or_add_tcPr()
+                        for old_vm in tcPr.findall(qn('w:vMerge')): tcPr.remove(old_vm)
+                        vm = OxmlElement('w:vMerge')
+                        if seen == 0:
+                            vm.set(qn('w:val'), 'restart')
+                        tcPr.append(vm)
+                else:
+                    write_cell(table.cell(row_idx, ci), str(val) if val is not None else "",
+                               bg=bg, bold=is_exceed, size_heb=9, size_eng=7)
 
         # ── מקרא ─────────────────────────────────────────────────────────────
         lp = doc.add_paragraph()
@@ -2463,20 +2496,6 @@ with tab_word:
     st.caption("העלה קובץ Excel מעובד מטאב Excel, בחר מספר טבלה וצור דוח Word")
     st.markdown("---")
 
-    # ── הגדרות TIER 1 משותפות לכל הטבלאות ───────────────────────────────────
-    with st.expander("⚙️ הגדרות TIER 1", expanded=True):
-        tw1, tw2, tw3 = st.columns(3)
-        with tw1:
-            w_land_use = st.selectbox("Land Use", ["Industrial","Residential"], key="w_land_use")
-        with tw2:
-            w_aquifer  = st.selectbox("Aquifer Sensitivity", ["A-1, A, B","B-1 or C"], key="w_aquifer")
-        with tw3:
-            w_depth_opts = ["Not Applicable"] if "b-1" in w_aquifer.lower() else ["0 - 6 m",">6 m"]
-            w_depth = st.selectbox("Depth to Groundwater", w_depth_opts, key="w_depth")
-    w_t1lbl = tier1_label(w_land_use, w_aquifer, w_depth)
-    st.caption(f"שורת TIER 1: **{w_t1lbl}**")
-    st.markdown("---")
-
     # ── TPH ──────────────────────────────────────────────────────────────────
     with st.expander("🛢️ טבלת TPH", expanded=True):
         wc1, wc2, wc3 = st.columns([4,1,1])
@@ -2491,7 +2510,7 @@ with tab_word:
             if st.button("📄 צור דוח Word – TPH", type="primary", use_container_width=True, key="btn_tph"):
                 try:
                     with st.spinner("⏳ בונה דוח..."):
-                        docx_bytes = build_tph_word(tph_file.read(), int(tph_num), tph_page, tph_land, t1lbl=w_t1lbl)
+                        docx_bytes = build_tph_word(tph_file.read(), int(tph_num), tph_page, tph_land)
                     st.success("✅ הדוח נוצר!")
                     st.download_button("⬇️ הורד דוח Word – TPH", data=docx_bytes,
                         file_name=f"TPH_table_{tph_num}.docx",
@@ -2518,7 +2537,7 @@ with tab_word:
             if st.button("📄 צור דוח Word – Metals", type="primary", use_container_width=True, key="btn_metals"):
                 try:
                     with st.spinner("⏳ בונה דוח..."):
-                        docx_bytes = build_metals_word(metals_file.read(), int(metals_num), page_size=metals_page, landscape=metals_land, t1lbl=w_t1lbl)
+                        docx_bytes = build_metals_word(metals_file.read(), int(metals_num), page_size=metals_page, landscape=metals_land)
                     st.success("✅ הדוח נוצר!")
                     st.download_button("⬇️ הורד דוח Word – Metals", data=docx_bytes,
                         file_name=f"Metals_table_{metals_num}.docx",
