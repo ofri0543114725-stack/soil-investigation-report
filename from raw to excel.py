@@ -2414,18 +2414,20 @@ with tab_word:
 
     # ── Metals ───────────────────────────────────────────────────────────────
     with st.expander("⚗️ טבלת Metals"):
-        wm1, wm2, wm3 = st.columns([4,1,1])
+        wm1, wm2, wm3, wm4 = st.columns([4,1,1,1])
         with wm1:
             metals_file = st.file_uploader("העלה קובץ Excel של Metals", type=["xlsx","xls"], key="wmetals")
         with wm2:
             metals_num  = st.number_input("מספר טבלה", min_value=1, max_value=99, value=5, step=1, key="wmetals_num")
         with wm3:
+            metals_page = st.selectbox("סוג דף", ["A3","A4","Tabloid"], key="wmetals_page")
+        with wm4:
             metals_land = st.selectbox("כיוון", ["לרוחב","לאורך"], key="wmetals_land") == "לרוחב"
         if metals_file:
             if st.button("📄 צור דוח Word – Metals", type="primary", use_container_width=True, key="btn_metals"):
                 try:
                     with st.spinner("⏳ בונה דוח..."):
-                        docx_bytes = build_metals_word(metals_file.read(), int(metals_num), landscape=metals_land)
+                        docx_bytes = build_metals_word(metals_file.read(), int(metals_num), page_size=metals_page, landscape=metals_land)
                     st.success("✅ הדוח נוצר!")
                     st.download_button("⬇️ הורד דוח Word – Metals", data=docx_bytes,
                         file_name=f"Metals_table_{metals_num}.docx",
