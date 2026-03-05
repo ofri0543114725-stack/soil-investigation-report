@@ -3433,61 +3433,6 @@ with tab_word:
         else:
             st.info("👆 העלה קובץ Excel של PFAS")
 
-    # ── VOC+SVOC ─────────────────────────────────────────────────────────────
-    with st.expander("🧪 טבלת VOC+SVOC"):
-        wv1, wv2, wv3, wv4 = st.columns([4,1,1,1])
-        with wv1:
-            voc_file = st.file_uploader("העלה קובץ Excel של VOC+SVOC", type=["xlsx","xls"], key="wvoc")
-        with wv2:
-            voc_num  = st.number_input("מספר טבלה", min_value=1, max_value=99, value=6, step=1, key="wvoc_num")
-        with wv3:
-            voc_page = st.selectbox("סוג דף", ["A3","A4","Tabloid"], key="wvoc_page")
-        with wv4:
-            voc_land = st.selectbox("כיוון", ["לרוחב","לאורך"], key="wvoc_land") == "לרוחב"
-        if voc_file:
-            if st.button("📄 צור דוח Word – VOC+SVOC", type="primary", use_container_width=True, key="btn_voc"):
-                try:
-                    with st.spinner("⏳ בונה דוח..."):
-                        docx_bytes = build_voc_word(voc_file.read(), int(voc_num), page_size=voc_page, landscape=voc_land)
-                    st.success("✅ הדוח נוצר!")
-                    st.download_button("⬇️ הורד דוח Word – VOC+SVOC", data=docx_bytes,
-                        file_name=f"VOC_SVOC_table_{voc_num}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True, key="dl_voc")
-                except Exception as e:
-                    st.error(f"❌ שגיאה: {e}")
-                    import traceback; st.code(traceback.format_exc())
-        else:
-            st.info("👆 העלה קובץ Excel של VOC+SVOC")
-
-    # ── PFAS ─────────────────────────────────────────────────────────────────
-    with st.expander("🔬 טבלת PFAS"):
-        wp1, wp2, wp3, wp4 = st.columns([4,1,1,1])
-        with wp1:
-            pfas_file = st.file_uploader("העלה קובץ Excel של PFAS", type=["xlsx","xls"], key="wpfas")
-        with wp2:
-            pfas_num  = st.number_input("מספר טבלה", min_value=1, max_value=99, value=7, step=1, key="wpfas_num")
-        with wp3:
-            pfas_page = st.selectbox("סוג דף", ["A3","A4","Tabloid"], key="wpfas_page")
-        with wp4:
-            pfas_land = st.selectbox("כיוון", ["לרוחב","לאורך"], key="wpfas_land") == "לרוחב"
-        if pfas_file:
-            if st.button("📄 צור דוח Word – PFAS", type="primary", use_container_width=True, key="btn_pfas"):
-                try:
-                    with st.spinner("⏳ בונה דוח..."):
-                        docx_bytes = build_pfas_word(pfas_file.read(), int(pfas_num), page_size=pfas_page, landscape=pfas_land)
-                    st.success("✅ הדוח נוצר!")
-                    st.download_button("⬇️ הורד דוח Word – PFAS", data=docx_bytes,
-                        file_name=f"PFAS_table_{pfas_num}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True, key="dl_pfas")
-                except Exception as e:
-                    st.error(f"❌ שגיאה: {e}")
-                    import traceback; st.code(traceback.format_exc())
-        else:
-            st.info("👆 העלה קובץ Excel של PFAS")
-
-
 def build_generic_transposed_word(xl_file_bytes, table_num, title_suffix,
                                    n_info_cols, n_hdr_rows,
                                    page_size="A3", landscape=True):
