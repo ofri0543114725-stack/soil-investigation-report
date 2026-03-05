@@ -1534,15 +1534,16 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         drills.append((current_sid, current_group))
 
     # ── כמה שורות נכנסות בדף ────────────────────────────────────────────────
-    # שורות לדף - ערך קבוע ובטוח לפי גודל דף
-    if page_size == "A4" and not landscape:
-        rows_pp = 30
-    elif page_size == "A4" and landscape:
-        rows_pp = 18
-    elif page_size == "Tabloid" and not landscape:
-        rows_pp = 42
-    else:  # Tabloid landscape
-        rows_pp = 28
+    # גובה שורות קבוע (twips) - מונע גלישה בין עמודים
+    ROW_H_TWIPS = 370   # ~0.65cm - מינימלי אך קריא
+    HDR_H_TWIPS = 390
+
+    USABLE_H  = page_h - 2*MARGIN
+    TITLE_H   = 340
+    LEGEND_H  = 340
+    HDR_TOTAL = 5 * HDR_H_TWIPS
+    avail     = USABLE_H - TITLE_H - LEGEND_H - HDR_TOTAL
+    rows_pp   = max(10, int(avail / ROW_H_TWIPS))
 
     # ── חלק קידוחים לדפים - לא לפצל קידוח בין דפים ─────────────────────────
     pages = []
@@ -1631,11 +1632,24 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
     def has_heb(text):
         return any('\u05d0' <= c <= '\u05ea' for c in str(text))
 
-    def write_cell(cell, text, bold=False, bg=WHITE):
+    def set_row_h(row, h_twips):
+        tr = row._tr
+        trPr = tr.find(qn('w:trPr'))
+        if trPr is None:
+            trPr = OxmlElement('w:trPr'); tr.insert(0, trPr)
+        for old in trPr.findall(qn('w:trHeight')): trPr.remove(old)
+        trH = OxmlElement('w:trHeight')
+        trH.set(qn('w:val'), str(h_twips))
+        trH.set(qn('w:hRule'), 'exact')
+        trPr.append(trH)
+
+    def write_cell(cell, text, bold=False, bg=WHITE, is_hdr=False):
         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
         set_bg(cell, bg); set_brd(cell)
         p = cell.paragraphs[0]; p.clear()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after  = Pt(0)
         pPr = p._p.get_or_add_pPr()
         bidi = OxmlElement('w:bidi'); pPr.append(bidi)
         txt = str(text) if text is not None else ""
@@ -1643,20 +1657,24 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         run = p.add_run(txt)
         run.bold = bold
         if has_heb(txt):
-            run.font.name = "David"; run.font.size = Pt(13)
+            run.font.name = "David"
+            run.font.size = Pt(10) if not is_hdr else Pt(10)
         else:
-            run.font.name = "Times New Roman"; run.font.size = Pt(11)
+            run.font.name = "Times New Roman"
+            run.font.size = Pt(9) if not is_hdr else Pt(9)
 
     def build_header(table):
         """בנה 5 שורות כותרת"""
+        for hi in range(N_HDR):
+            set_row_h(table.rows[hi], HDR_H_TWIPS)
         # שורה 0
-        write_cell(table.cell(0,0), "שם קידוח", bold=True, bg=HDR_BLUE)
+        write_cell(table.cell(0,0), "שם קידוח", bold=True, bg=HDR_BLUE, is_hdr=True)
         set_vm(table.cell(0,0), restart=True)
-        write_cell(table.cell(0,1), "עומק", bold=True, bg=HDR_BLUE)
+        write_cell(table.cell(0,1), "עומק", bold=True, bg=HDR_BLUE, is_hdr=True)
         set_vm(table.cell(0,1), restart=True)
-        write_cell(table.cell(0,2), "אנליזה", bold=True, bg=HDR_BLUE)
+        write_cell(table.cell(0,2), "אנליזה", bold=True, bg=HDR_BLUE, is_hdr=True)
         for ci,lbl in enumerate(["TPH DRO","TPH ORO","Total TPH"],3):
-            write_cell(table.cell(0,ci), lbl, bold=True, bg=HDR_BLUE)
+            write_cell(table.cell(0,ci), lbl, bold=True, bg=HDR_BLUE, is_hdr=True)
         # שורות 1-4
         sub = [("יחידות",["mg/kg","mg/kg","mg/kg"]),
                ("CAS",   ["C-10-C-40","C-10-C-40","C-10-C-40"]),
@@ -1665,9 +1683,9 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         for hi,(lbl,vals) in enumerate(sub,1):
             write_cell(table.cell(hi,0),"",bg=HDR_BLUE); set_vm(table.cell(hi,0))
             c12=table.cell(hi,1); c12.merge(table.cell(hi,2))
-            write_cell(c12,lbl,bold=True,bg=HDR_BLUE)
+            write_cell(c12,lbl,bold=True,bg=HDR_BLUE,is_hdr=True)
             for ci,v in enumerate(vals,3):
-                write_cell(table.cell(hi,ci),v,bold=True,bg=HDR_BLUE)
+                write_cell(table.cell(hi,ci),v,bold=True,bg=HDR_BLUE,is_hdr=True)
 
     # ── בנה Document ───────────────────────────────────────────────────────────
     doc = Document()
@@ -1718,6 +1736,7 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
                 else:
                     write_cell(table.cell(row_idx,0), "", bg=WHITE)
                     set_vm(table.cell(row_idx,0))
+                set_row_h(table.rows[row_idx], ROW_H_TWIPS)
                 cd = table.cell(row_idx,1); cd.merge(table.cell(row_idx,2))
                 write_cell(cd, str(dep) if dep is not None else "", bg=WHITE)
                 for ci in range(3,6):
@@ -1736,21 +1755,23 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
             lp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             pPr2 = lp._p.get_or_add_pPr()
             bd = OxmlElement('w:bidi'); pPr2.append(bd)
-            lp.paragraph_format.space_before = Pt(4)
+            lp.paragraph_format.space_before = Pt(3)
+            lp.paragraph_format.space_after  = Pt(0)
             if has_yel:
-                r1 = lp.add_run("■ "); r1.font.name="David"; r1.font.size=Pt(13)
+                r1 = lp.add_run("■ "); r1.font.name="David"; r1.font.size=Pt(10)
                 r1.font.color.rgb = RGBColor.from_string("CCCC00")
-                r2 = lp.add_run("בצהוב"); r2.bold=True; r2.font.name="David"; r2.font.size=Pt(13)
+                r2 = lp.add_run("בצהוב"); r2.bold=True; r2.font.name="David"; r2.font.size=Pt(10)
                 r2.font.color.rgb = RGBColor.from_string("CCCC00")
                 r3 = lp.add_run(" - חריגה מערך הסף VSL    ")
-                r3.font.name="David"; r3.font.size=Pt(13)
+                r3.font.name="David"; r3.font.size=Pt(10)
             if has_org:
-                r4 = lp.add_run("■ "); r4.font.name="David"; r4.font.size=Pt(13)
+                if has_yel: lp.add_run("   ")
+                r4 = lp.add_run("■ "); r4.font.name="David"; r4.font.size=Pt(10)
                 r4.font.color.rgb = RGBColor.from_string("FFC000")
-                r5 = lp.add_run("בכתום"); r5.bold=True; r5.font.name="David"; r5.font.size=Pt(13)
+                r5 = lp.add_run("בכתום"); r5.bold=True; r5.font.name="David"; r5.font.size=Pt(10)
                 r5.font.color.rgb = RGBColor.from_string("FFC000")
                 r6 = lp.add_run(" - חריגה מערך הסף TIER 1")
-                r6.font.name="David"; r6.font.size=Pt(13)
+                r6.font.name="David"; r6.font.size=Pt(10)
 
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     return buf.getvalue()
