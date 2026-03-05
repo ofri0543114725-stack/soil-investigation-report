@@ -2891,13 +2891,310 @@ def build_voc_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
 
 
 def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
-    return build_generic_transposed_word(
-        xl_file_bytes, table_num,
-        title_suffix="תוצאות אנליזות PFAS",
-        n_info_cols=5, n_hdr_rows=2,
-        hdr_color="0070C0", group_color="FFFFFF",
-        page_size=page_size, landscape=landscape
-    )
+    """
+    PFAS Word - טבלה מסובבת:
+    - שורה 0 (header): עמודת קידוח/עומק + שמות תרכובות אנכית
+    - עמודות data: CAS, ערך סף, יחידות, LOR + ערכי קידוחים
+    מבנה Excel: rows=תרכובות, cols=קידוחים → Word: rows=קידוחים, cols=תרכובות
+    """
+    import io, re
+    from lxml import etree as _lxml
+    from docx import Document
+    from docx.shared import Pt, Emu
+    from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
+    from docx.enum.section import WD_ORIENT
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    import openpyxl
+
+    HDR_BG  = "0070C0"
+    YELLOW  = "FFFF00"
+    WHITE   = "FFFFFF"
+    _W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+    def _w(tag): return f'{{{_W}}}{tag}'
+
+    wb = openpyxl.load_workbook(io.BytesIO(xl_file_bytes), data_only=True)
+    ws = wb.active
+
+    # ── קרא נתונים מהאקסל ──────────────────────────────────────────────────
+    # Excel structure: row1=headers(compound names), row2=headers2, rows3+=data
+    # cols: 0=compound, 1=CAS, 2=threshold, 3=units, 4=LOR, 5=drill_header, 6+=drill data
+
+    def xl_val(r, c):
+        v = ws.cell(r, c).value
+        return str(v).strip() if v is not None else ''
+
+    def xl_fill(r, c):
+        try:
+            fill = ws.cell(r, c).fill
+            if fill and fill.fill_type not in (None, 'none'):
+                fg = fill.fgColor
+                if fg.type == 'rgb':
+                    h = fg.rgb[-6:].upper()
+                    if h not in ('FFFFFF', '000000', ''): return h
+        except: pass
+        return None
+
+    n_xl_rows = ws.max_row
+    n_xl_cols = ws.max_column
+
+    # שורה 1 = כותרות (row index 1 in openpyxl)
+    # שורה 2 = כותרות שורה 2
+    # שורות 3+ = נתוני תרכובות
+
+    # מצא עמודות קידוחים (col 6+ בעמודה 1-indexed)
+    n_info_cols = 5   # compound, CAS, threshold, units, LOR
+    drill_start_xl = n_info_cols + 1 + 1  # 1-indexed: col 7
+    n_drills = n_xl_cols - n_info_cols - 1  # col 6 = drill label header
+
+    # אסוף שמות קידוחים
+    drills = []  # list of (name, depth)
+    for c in range(drill_start_xl, n_xl_cols + 1):
+        name  = xl_val(1, c)
+        depth = xl_val(2, c)
+        if name:
+            drills.append((name, depth))
+
+    # אסוף תרכובות
+    compounds = []  # list of dict
+    for r in range(3, n_xl_rows + 1):
+        cmp_name = xl_val(r, 1)
+        if not cmp_name: continue
+        cas       = xl_val(r, 2)
+        threshold = xl_val(r, 3)
+        units     = xl_val(r, 4)
+        lor       = xl_val(r, 5)
+        values    = []
+        for c in range(drill_start_xl, n_xl_cols + 1):
+            val  = xl_val(r, c)
+            fill = xl_fill(r, c)
+            values.append((val, fill))
+        compounds.append({
+            'name': cmp_name, 'cas': cas,
+            'threshold': threshold, 'units': units, 'lor': lor,
+            'values': values
+        })
+
+    if not compounds or not drills:
+        raise ValueError("לא נמצאו נתונים בקובץ Excel")
+
+    n_compounds = len(compounds)
+    n_drills_actual = len(drills)
+
+    # ── גודל דף ──────────────────────────────────────────────────────────────
+    PAGE = {
+        "A3":      (int(16.54*914400), int(11.69*914400)),
+        "A4":      (int(11.69*914400), int(8.27*914400)),
+        "Tabloid": (int(17*914400),    int(11*914400)),
+    }
+    pw, ph = PAGE.get(page_size, PAGE["A3"])
+    page_w = max(pw, ph) if landscape else min(pw, ph)
+    page_h = min(pw, ph) if landscape else max(pw, ph)
+    MARGIN    = int(0.4 * 914400)
+    content_w = page_w - 2 * MARGIN
+
+    # ── רוחב עמודות ──────────────────────────────────────────────────────────
+    # עמודה 0: קידוח/עומק - רחבה
+    # עמודות 1-n_compounds: תרכובות - צרות (שם אנכי)
+    drill_col_w   = int(content_w * 0.12)  # ~12% לעמודת קידוח
+    compound_col_w = max(int((content_w - drill_col_w) // n_compounds), int(0.3 * 914400))
+
+    # גובה שורת header (תרכובות אנכיות) - גבוה
+    HEADER_H = 3600   # ~2.5 inch in twips*20... actually in EMU/20 = twips
+    # Actually row height in Word XML is in twentieths of a point (twips)
+    # 1 inch = 1440 twips, so 2 inch = 2880
+    HEADER_H_TWIPS = 2880  # 2 inches for vertical text
+    DATA_H_TWIPS   = 360   # 0.25 inch per data row
+
+    def set_page(section):
+        section.orientation = WD_ORIENT.LANDSCAPE if landscape else WD_ORIENT.PORTRAIT
+        section.page_width  = page_w
+        section.page_height = page_h
+        for a in ('left_margin','right_margin','top_margin','bottom_margin'):
+            setattr(section, a, MARGIN)
+
+    # ── עזרי Word ─────────────────────────────────────────────────────────────
+    def set_bg(wc, hex_color):
+        tcPr = wc._tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:shd')): tcPr.remove(old)
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:val'), 'clear')
+        shd.set(qn('w:color'), 'auto')
+        shd.set(qn('w:fill'), hex_color)
+        tcPr.append(shd)
+
+    def set_brd(wc):
+        tcPr = wc._tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:tcBorders')): tcPr.remove(old)
+        brd = OxmlElement('w:tcBorders')
+        for side in ('top','left','bottom','right'):
+            b = OxmlElement(f'w:{side}')
+            b.set(qn('w:val'), 'single'); b.set(qn('w:sz'), '4')
+            b.set(qn('w:space'), '0'); b.set(qn('w:color'), '000000')
+            brd.append(b)
+        tcPr.append(brd)
+
+    def set_row_h(tr, twips, exact=True):
+        trPr = tr.find(qn('w:trPr'))
+        if trPr is None:
+            trPr = OxmlElement('w:trPr'); tr.insert(0, trPr)
+        for old in trPr.findall(qn('w:trHeight')): trPr.remove(old)
+        trH = OxmlElement('w:trHeight')
+        trH.set(qn('w:val'), str(twips))
+        if exact: trH.set(qn('w:hRule'), 'exact')
+        trPr.append(trH)
+
+    def set_text_direction(wc, direction='btLr'):
+        """direction: btLr = bottom-to-top (reads upward), tbRl = top-to-bottom"""
+        tcPr = wc._tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:textDirection')): tcPr.remove(old)
+        td = OxmlElement('w:textDirection')
+        td.set(qn('w:val'), direction)
+        tcPr.append(td)
+
+    def write_plain(wc, text, bold=False, bg=WHITE, sz=16, color=None, vertical=False):
+        wc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        set_bg(wc, bg); set_brd(wc)
+        if vertical:
+            set_text_direction(wc, 'btLr')
+        p = wc.paragraphs[0]; p.clear()
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after  = Pt(0)
+        pPr = p._p.get_or_add_pPr()
+        jc = OxmlElement('w:jc')
+        jc.set(qn('w:val'), 'center')
+        pPr.append(jc)
+        if not str(text).strip(): return
+        r = _lxml.SubElement(p._p, _w('r'))
+        rPr = _lxml.SubElement(r, _w('rPr'))
+        rF = _lxml.SubElement(rPr, _w('rFonts'))
+        for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a), 'Times New Roman')
+        if bold:
+            _lxml.SubElement(rPr, _w('b')).set(_w('val'), '1')
+            _lxml.SubElement(rPr, _w('bCs')).set(_w('val'), '1')
+        if color:
+            _lxml.SubElement(rPr, _w('color')).set(_w('val'), color)
+        _lxml.SubElement(rPr, _w('sz')).set(_w('val'), str(sz))
+        _lxml.SubElement(rPr, _w('szCs')).set(_w('val'), str(sz))
+        t_el = _lxml.SubElement(r, _w('t'))
+        t_el.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+        t_el.text = str(text)
+
+    # ── בנה Document ──────────────────────────────────────────────────────────
+    doc = Document()
+    for p in doc.paragraphs:
+        p._element.getparent().remove(p._element)
+
+    set_page(doc.sections[0])
+
+    # כותרת
+    title = f"טבלה מספר {table_num} – תוצאות אנליזות PFAS"
+    tp = doc.add_paragraph()
+    tp.paragraph_format.space_before = Pt(0)
+    tp.paragraph_format.space_after  = Pt(2)
+    tp.paragraph_format.keep_with_next = True
+    pPr = tp._p.get_or_add_pPr()
+    _lxml.SubElement(pPr, _w('bidi'))
+    _lxml.SubElement(pPr, _w('jc')).set(_w('val'), 'center')
+    r = _lxml.SubElement(tp._p, _w('r'))
+    rPr = _lxml.SubElement(r, _w('rPr'))
+    rF = _lxml.SubElement(rPr, _w('rFonts'))
+    for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a), 'David')
+    _lxml.SubElement(rPr, _w('b')).set(_w('val'), '1')
+    _lxml.SubElement(rPr, _w('bCs')).set(_w('val'), '1')
+    _lxml.SubElement(rPr, _w('u')).set(_w('val'), 'single')
+    _lxml.SubElement(rPr, _w('sz')).set(_w('val'), '24')
+    _lxml.SubElement(rPr, _w('szCs')).set(_w('val'), '24')
+    _lxml.SubElement(rPr, _w('rtl'))
+    t_el = _lxml.SubElement(r, _w('t'))
+    t_el.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+    t_el.text = title
+
+    # ── טבלה ─────────────────────────────────────────────────────────────────
+    # מבנה: n_rows = 1(header) + n_drills, n_cols = 1(drill) + n_compounds
+    n_rows = 1 + n_drills_actual
+    n_cols = 1 + n_compounds
+
+    table = doc.add_table(rows=n_rows, cols=n_cols)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.style = 'Table Grid'
+
+    # רוחב עמודות
+    for ci in range(n_cols):
+        w = drill_col_w if ci == 0 else compound_col_w
+        for wc in table.columns[ci].cells:
+            wc.width = Emu(w)
+
+    # גובה שורות
+    set_row_h(table.rows[0]._tr, HEADER_H_TWIPS)
+    for ri in range(1, n_rows):
+        set_row_h(table.rows[ri]._tr, DATA_H_TWIPS)
+
+    has_yel = False
+
+    # ── שורה 0: כותרת ────────────────────────────────────────────────────────
+    # תא [0,0]: "שם הקידוח / עומק"
+    write_plain(table.cell(0, 0), "שם הקידוח / עומק",
+                bold=True, bg=HDR_BG, sz=16, color='FFFFFF')
+
+    # תאים [0, 1..n]: שם תרכובת אנכי
+    for ci, cmp in enumerate(compounds):
+        write_plain(table.cell(0, ci+1), cmp['name'],
+                    bold=True, bg=HDR_BG, sz=14, color='FFFFFF', vertical=True)
+
+    # ── שורות data: קידוח + ערכים ────────────────────────────────────────────
+    for ri, (drill_name, drill_depth) in enumerate(drills):
+        row_idx = ri + 1
+        label = f"{drill_name}\n{drill_depth}" if drill_depth and drill_depth != drill_name else drill_name
+        write_plain(table.cell(row_idx, 0), label, bold=True, bg=HDR_BG, sz=16, color='FFFFFF')
+
+        for ci, cmp in enumerate(compounds):
+            val, fill = cmp['values'][ri] if ri < len(cmp['values']) else ('', None)
+            bg = YELLOW if fill == YELLOW else WHITE
+            if bg == YELLOW: has_yel = True
+            write_plain(table.cell(row_idx, ci+1), val, bold=(bg==YELLOW), bg=bg, sz=16)
+
+    # ── מקרא ─────────────────────────────────────────────────────────────────
+    lp = doc.add_paragraph()
+    lp.paragraph_format.space_before = Pt(4)
+    lp.paragraph_format.space_after  = Pt(0)
+    lp_pPr = lp._p.get_or_add_pPr()
+    _lxml.SubElement(lp_pPr, _w('jc')).set(_w('val'), 'right')
+
+    if has_yel:
+        def _leg_colored(word, color):
+            r2 = _lxml.SubElement(lp._p, _w('r'))
+            rPr = _lxml.SubElement(r2, _w('rPr'))
+            rF = _lxml.SubElement(rPr, _w('rFonts'))
+            for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a), 'David')
+            _lxml.SubElement(rPr, _w('b')).set(_w('val'), '1')
+            _lxml.SubElement(rPr, _w('bCs')).set(_w('val'), '1')
+            _lxml.SubElement(rPr, _w('sz')).set(_w('val'), '18')
+            _lxml.SubElement(rPr, _w('szCs')).set(_w('val'), '18')
+            shd = _lxml.SubElement(rPr, _w('shd'))
+            shd.set(_w('val'), 'clear'); shd.set(_w('color'), 'auto'); shd.set(_w('fill'), color)
+            _lxml.SubElement(rPr, _w('rtl'))
+            t2 = _lxml.SubElement(r2, _w('t'))
+            t2.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+            t2.text = word
+
+        def _leg_plain(text):
+            r2 = _lxml.SubElement(lp._p, _w('r'))
+            rPr = _lxml.SubElement(r2, _w('rPr'))
+            rF = _lxml.SubElement(rPr, _w('rFonts'))
+            for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a), 'David')
+            _lxml.SubElement(rPr, _w('sz')).set(_w('val'), '18')
+            _lxml.SubElement(rPr, _w('szCs')).set(_w('val'), '18')
+            _lxml.SubElement(rPr, _w('rtl'))
+            t2 = _lxml.SubElement(r2, _w('t'))
+            t2.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+            t2.text = text
+
+        _leg_colored("בצהוב", "FFFF00")
+        _leg_plain(" - חריגה מערך הסף")
+
+    buf = io.BytesIO(); doc.save(buf); buf.seek(0)
+    return buf.getvalue()
 
 with tab_word:
     st.header("📄 יצוא דוח Word")
