@@ -1757,6 +1757,15 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
 
     # ── בנה Document ─────────────────────────────────────────────────────────
     doc = Document()
+    # הסר bold=false מסגנון ברירת מחדל
+    from lxml import etree as _lxml_def
+    _W_DEF = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+    styles = doc.element.find(f'{{{_W_DEF}}}styles')
+    if styles is not None:
+        for b_off in styles.findall(f'.//{{{_W_DEF}}}b[@{{{_W_DEF}}}val="0"]'):
+            b_off.getparent().remove(b_off)
+        for b_off in styles.findall(f'.//{{{_W_DEF}}}bCs[@{{{_W_DEF}}}val="0"]'):
+            b_off.getparent().remove(b_off)
     for p in doc.paragraphs:
         p._element.getparent().remove(p._element)
 
@@ -1796,7 +1805,10 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         rF = _lxml.SubElement(rPr_el, _w('rFonts'))
         for a in ('ascii','hAnsi','cs','eastAsia'):
             rF.set(_w(a), 'David')
-        _lxml.SubElement(rPr_el, _w('b'))          # bold
+        b_el = _lxml.SubElement(rPr_el, _w('b'))   # bold
+        b_el.set(_w('val'), '1')                   # explicit val=1 overrides style
+        bCs_el = _lxml.SubElement(rPr_el, _w('bCs'))  # bold complex script (Hebrew)
+        bCs_el.set(_w('val'), '1')
         u_el = _lxml.SubElement(rPr_el, _w('u'))
         u_el.set(_w('val'), 'single')              # underline
         sz_el = _lxml.SubElement(rPr_el, _w('sz'))
