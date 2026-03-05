@@ -2390,1060 +2390,19 @@ def build_metals_word(xl_file_bytes, table_num, page_size="A3", landscape=True, 
     return buf.getvalue()
 
 
-def build_voc_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
-    """בונה דוח Word לטבלת VOC+SVOC - קורא ישירות מהאקסל"""
-    import io, re
-    from lxml import etree as _lxml
-    from docx import Document
-    from docx.shared import Pt, Twips, Inches, Emu, RGBColor
-    from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
-    from docx.enum.section import WD_ORIENT
-    from docx.oxml.ns import qn
-    from docx.oxml import OxmlElement
-    import openpyxl
-
-    YELLOW = "FFFF00"
-    ORANGE = "FFC000"
-    WHITE  = "FFFFFF"
-    HDR_BG = "B7D7F0"
-    N_HDR  = 2   # שורות כותרת באקסל
-
-    wb = openpyxl.load_workbook(io.BytesIO(xl_file_bytes), data_only=True)
-    ws = None
-    for name in wb.sheetnames:
-        if "voc" in name.lower() or "svoc" in name.lower():
-            ws = wb[name]; break
-    if ws is None: ws = wb.active
-
-    xl_rows = list(ws.iter_rows())
-    if not xl_rows: raise ValueError("הקובץ ריק")
-
-    # סנן עמודות ריקות לגמרי
-    n_raw = len(xl_rows[0])
-    non_empty_cols = [ci for ci in range(n_raw)
-                      if any(xl_rows[ri][ci].value not in (None,"","-")
-                             for ri in range(len(xl_rows)))]
-    xl_rows = [[row[ci] for ci in non_empty_cols] for row in xl_rows]
-    n_cols = len(xl_rows[0])
-
-    # קרא t1lbl מהאקסל (שורה 0, עמודה TIER1 = col 5 אינדקס)
-    t1lbl = "TIER 1"
-    if len(xl_rows[0]) > 5 and xl_rows[0][5].value:
-        t1lbl = str(xl_rows[0][5].value).strip()
-
-    def get_color(cell):
-        try:
-            fill = cell.fill
-            if fill and fill.fill_type not in (None,"none"):
-                fg = fill.fgColor
-                if fg.type=="rgb":
-                    h = fg.rgb[-6:].upper()
-                    if h == YELLOW: return YELLOW
-                    if h == ORANGE: return ORANGE
-        except: pass
-        return None
-
-    def fmt_val(raw):
-        if raw is None: return ""
-        s = str(raw).strip()
-        if not s or s=="-": return s
-        if s.startswith("<"): return s
-        try:
-            f = float(s)
-            if f == int(f) and abs(f) >= 1000: return f"{int(f):,}"
-            elif abs(f) >= 1000: return f"{f:,.1f}"
-        except: pass
-        return s
-
-    def has_heb(text):
-        t = str(text).strip()
-        if not t: return False
-        if any("\\u05d0"<=c<="\\u05ea" for c in t): return True
-        if any(c.isalpha() for c in t): return False
-        return True
-
-    _W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-    def _w(tag): return f"{{{_W}}}{tag}"
-
-    def set_page(section):
-        if landscape:
-            section.orientation = WD_ORIENT.LANDSCAPE
-            section.page_width  = Inches(17); section.page_height = Inches(11)
-        else:
-            section.orientation = WD_ORIENT.PORTRAIT
-            section.page_width  = Inches(8.5); section.page_height = Inches(11)
-        for a in ("left_margin","right_margin","top_margin","bottom_margin"):
-            setattr(section, a, Inches(0.4))
-
-    def set_bg(cell, hex_color):
-        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
-        for old in tcPr.findall(qn("w:shd")): tcPr.remove(old)
-        shd = OxmlElement("w:shd")
-        shd.set(qn("w:val"),"clear"); shd.set(qn("w:color"),"auto")
-        shd.set(qn("w:fill"), hex_color); tcPr.append(shd)
-
-    def set_brd(cell):
-        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
-        for old in tcPr.findall(qn("w:tcBorders")): tcPr.remove(old)
-        borders = OxmlElement("w:tcBorders")
-        for side in ("top","left","bottom","right"):
-            b = OxmlElement(f"w:{side}")
-            b.set(qn("w:val"),"single"); b.set(qn("w:sz"),"4")
-            b.set(qn("w:space"),"0"); b.set(qn("w:color"),"000000")
-            borders.append(b)
-        tcPr.append(borders)
-
-    def set_row_height(tr, h_twips):
-        trPr = tr.find(qn("w:trPr"))
-        if trPr is None:
-            trPr = OxmlElement("w:trPr"); tr.insert(0, trPr)
-        for old in trPr.findall(qn("w:trHeight")): trPr.remove(old)
-        trH = OxmlElement("w:trHeight")
-        trH.set(qn("w:val"), str(h_twips)); trH.set(qn("w:hRule"), "exact")
-        trPr.append(trH)
-
-    def set_vm(cell, restart=False):
-        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
-        for old in tcPr.findall(qn("w:vMerge")): tcPr.remove(old)
-        vm = OxmlElement("w:vMerge")
-        if restart: vm.set(qn("w:val"), "restart")
-        tcPr.append(vm)
-
-    def set_hmerge(cell, span):
-        """מזג תאים אופקית - הגדר gridSpan"""
-        if span <= 1: return
-        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
-        for old in tcPr.findall(qn("w:gridSpan")): tcPr.remove(old)
-        gs = OxmlElement("w:gridSpan"); gs.set(qn("w:val"), str(span))
-        tcPr.append(gs)
-
-    def add_run(para, text, bold=False, size_heb=9, size_eng=7, color_hex=None):
-        if not str(text): return
-        lines = str(text).split("\\n")
-        use_heb = has_heb(text)
-        fname   = "David" if use_heb else "Times New Roman"
-        fsize   = str(size_heb*2) if use_heb else str(size_eng*2)
-
-        def _mk_run(txt):
-            r = _lxml.SubElement(para._p, _w("r"))
-            rPr = _lxml.SubElement(r, _w("rPr"))
-            rF = _lxml.SubElement(rPr, _w("rFonts"))
-            for a in ("ascii","hAnsi","cs","eastAsia"): rF.set(_w(a), fname)
-            if bold:
-                _lxml.SubElement(rPr, _w("b")).set(_w("val"),"1")
-                _lxml.SubElement(rPr, _w("bCs")).set(_w("val"),"1")
-            if color_hex:
-                _lxml.SubElement(rPr, _w("color")).set(_w("val"), color_hex)
-            _lxml.SubElement(rPr, _w("sz")).set(_w("val"), fsize)
-            _lxml.SubElement(rPr, _w("szCs")).set(_w("val"), fsize)
-            _lxml.SubElement(rPr, _w("rtl"))
-            t = _lxml.SubElement(r, _w("t"))
-            t.set("{http://www.w3.org/XML/1998/namespace}space","preserve")
-            t.text = txt
-
-        def _mk_br():
-            _lxml.SubElement(_lxml.SubElement(para._p, _w("r")), _w("br"))
-
-        for i, line in enumerate(lines):
-            if i > 0: _mk_br()
-            _mk_run(line)
-
-    def write_cell(cell, text, bold=False, bg=WHITE, size_heb=9, size_eng=7, align="center"):
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        set_bg(cell, bg); set_brd(cell)
-        p = cell.paragraphs[0]; p.clear()
-        p.paragraph_format.space_before = Pt(0)
-        p.paragraph_format.space_after  = Pt(0)
-        pPr = p._p.get_or_add_pPr()
-        pPr.append(OxmlElement("w:bidi"))
-        jc = OxmlElement("w:jc"); jc.set(qn("w:val"), align); pPr.append(jc)
-        raw = str(text or "")
-        txt = raw if any("\\u05d0"<=c<="\\u05ea" for c in raw) else fmt_val(raw)
-        if not txt: return
-        add_run(p, txt, bold=bold, size_heb=size_heb, size_eng=size_eng)
-
-    def del_cell(cell):
-        """סמן תא כנמחק (לאחר hMerge)"""
-        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
-        shd = OxmlElement("w:shd")
-        shd.set(qn("w:val"),"clear"); shd.set(qn("w:color"),"auto")
-        shd.set(qn("w:fill"), WHITE); tcPr.append(shd)
-
-    # ── גלה מיזוגי אקסל ─────────────────────────────────────────────────────
-    # openpyxl: ws.merged_cells.ranges
-    xl_merges = []
-    for mr in ws.merged_cells.ranges:
-        xl_merges.append((mr.min_row, mr.min_col, mr.max_row, mr.max_col))
-
-    def get_xl_hmerge_span(row_0idx, col_0idx):
-        """כמה עמודות ממוזגות מ-(row,col) בהתחלה? (0-based → 1-based בopenpyxl)"""
-        r = row_0idx + 1; c = col_0idx + 1
-        # c is in non_empty_cols original index? We need to map back
-        # Actually since we filtered empty cols, the col indices shifted
-        # Use xl_rows directly - the value is already in the right cell
-        for mr_min_row, mr_min_col, mr_max_row, mr_max_col in xl_merges:
-            if mr_min_row == r and mr_min_col == (non_empty_cols[col_0idx]+1):
-                # count how many non_empty_cols fall in this merge
-                span = sum(1 for oc in non_empty_cols
-                           if mr_min_col <= oc+1 <= mr_max_col)
-                return max(1, span)
-        return 1
-
-    def is_xl_merged_continuation(row_0idx, col_0idx):
-        """האם תא זה הוא המשך של merge (לא ראשון)?"""
-        r = row_0idx + 1; c = non_empty_cols[col_0idx] + 1
-        for mr_min_row, mr_min_col, mr_max_row, mr_max_col in xl_merges:
-            if (mr_min_row <= r <= mr_max_row and
-                mr_min_col <= c <= mr_max_col and
-                not (r == mr_min_row and c == mr_min_col)):
-                return True
-        return False
-
-    # ── גדלי עמודות ─────────────────────────────────────────────────────────
-    usable_w = int((17 - 0.8) * 914400) if landscape else int((8.5-0.8)*914400)
-    # fixed cols (1-9 for VOC): take ~55% of width, sample cols: rest
-    n_fixed = 9   # קבוצה,קבוצה,שם,CAS,VSL,TIER1,יחידות(×2),שם קידוח
-    n_sample = max(1, n_cols - n_fixed)
-    fixed_w  = int(usable_w * 0.50)
-    sample_w = usable_w - fixed_w
-    # fixed col widths proportional
-    fixed_ratios = [3,8,18,6,5,7,4,4,6]  # relative widths
-    rs = sum(fixed_ratios[:n_fixed])
-    col_widths = [int(fixed_w * r / rs) for r in fixed_ratios[:n_fixed]]
-    each_sample = max(1, sample_w // n_sample)
-    col_widths += [each_sample] * n_sample
-    # correct last
-    col_widths[-1] += usable_w - sum(col_widths)
-
-    # ── data rows ────────────────────────────────────────────────────────────
-    data_xl_rows = xl_rows[N_HDR:]
-    ROW_H   = 260
-    HDR_H   = 360
-    TITLE_H = 400
-    SPACER_H= 480
-    LEGEND_H= 320
-    usable_h = 14688  # A3 landscape
-    rows_pp = max(15, int((usable_h - TITLE_H - SPACER_H - LEGEND_H - N_HDR*HDR_H) / ROW_H))
-
-    pages = []
-    for i in range(0, max(1, len(data_xl_rows)), rows_pp):
-        pages.append(data_xl_rows[i:i+rows_pp])
-    total_parts = len(pages)
-
-    # ── בנה מסמך ────────────────────────────────────────────────────────────
-    doc = Document()
-    _W_DEF = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-    styles = doc.element.find(f"{{{_W_DEF}}}styles")
-    if styles is not None:
-        for b in styles.findall(f'.//{{{_W_DEF}}}b[@{{{_W_DEF}}}val="0"]'):
-            b.getparent().remove(b)
-        for b in styles.findall(f'.//{{{_W_DEF}}}bCs[@{{{_W_DEF}}}val="0"]'):
-            b.getparent().remove(b)
-    for p in doc.paragraphs:
-        p._element.getparent().remove(p._element)
-
-    def _title_segments(txt):
-        parts = re.split(r"([A-Za-z]+)", txt)
-        return [(p, bool(re.match(r"^[A-Za-z]+$", p))) for p in parts if p]
-
-    def _add_title_run(parent_p, text, is_eng):
-        fname = "Times New Roman" if is_eng else "David"
-        fsize = "22" if is_eng else "26"
-        r = _lxml.SubElement(parent_p, _w("r"))
-        rPr = _lxml.SubElement(r, _w("rPr"))
-        rF = _lxml.SubElement(rPr, _w("rFonts"))
-        for a in ("ascii","hAnsi","cs","eastAsia"): rF.set(_w(a), fname)
-        _lxml.SubElement(rPr, _w("b")).set(_w("val"),"1")
-        _lxml.SubElement(rPr, _w("bCs")).set(_w("val"),"1")
-        _lxml.SubElement(rPr, _w("u")).set(_w("val"),"single")
-        _lxml.SubElement(rPr, _w("sz")).set(_w("val"), fsize)
-        _lxml.SubElement(rPr, _w("szCs")).set(_w("val"), fsize)
-        _lxml.SubElement(rPr, _w("rtl"))
-        t = _lxml.SubElement(r, _w("t"))
-        t.set("{http://www.w3.org/XML/1998/namespace}space","preserve")
-        t.text = text
-
-    def leg_run(para, word, hex_color=None, plain=False):
-        r = _lxml.SubElement(para._p, _w("r"))
-        rPr = _lxml.SubElement(r, _w("rPr"))
-        rF = _lxml.SubElement(rPr, _w("rFonts"))
-        for a in ("ascii","hAnsi","cs","eastAsia"): rF.set(_w(a),"David")
-        if not plain:
-            _lxml.SubElement(rPr, _w("b")).set(_w("val"),"1")
-            _lxml.SubElement(rPr, _w("bCs")).set(_w("val"),"1")
-            shd = _lxml.SubElement(rPr, _w("shd"))
-            shd.set(_w("val"),"clear"); shd.set(_w("color"),"auto")
-            shd.set(_w("fill"), hex_color)
-        _lxml.SubElement(rPr, _w("sz")).set(_w("val"),"18")
-        _lxml.SubElement(rPr, _w("szCs")).set(_w("val"),"18")
-        _lxml.SubElement(rPr, _w("rtl"))
-        t = _lxml.SubElement(r, _w("t"))
-        t.set("{http://www.w3.org/XML/1998/namespace}space","preserve")
-        t.text = word
-
-    import re
-
-    for part_idx, page_rows in enumerate(pages):
-        pn    = part_idx + 1
-        pts   = f"(חלק {pn} מתוך {total_parts})" if total_parts > 1 else ""
-        title = f"טבלה מספר {table_num} {pts} – תוצאות אנליזות VOC+SVOC".strip()
-
-        section = doc.sections[0] if part_idx == 0 else doc.add_section()
-        set_page(section)
-
-        # כותרת
-        tp = doc.add_paragraph()
-        tp.paragraph_format.space_before = Pt(0)
-        tp.paragraph_format.space_after  = Pt(0)
-        tp.paragraph_format.keep_with_next = True
-        pPr = tp._p.get_or_add_pPr()
-        _lxml.SubElement(pPr, _w("bidi"))
-        jc = _lxml.SubElement(pPr, _w("jc")); jc.set(_w("val"),"center")
-        for seg, is_eng in _title_segments(title):
-            _add_title_run(tp._p, seg, is_eng)
-
-        # רווח
-        sp_p = doc.add_paragraph()
-        sp_p.paragraph_format.space_before = Pt(0)
-        sp_p.paragraph_format.space_after  = Pt(0)
-        sp_p.paragraph_format.line_spacing = Pt(19.5)
-        sp_p.paragraph_format.keep_with_next = True
-
-        # טבלה
-        n_rows_table = N_HDR + len(page_rows)
-        table = doc.add_table(rows=n_rows_table, cols=n_cols)
-        table.alignment = WD_TABLE_ALIGNMENT.CENTER
-
-        # rוחב עמודות + RTL
-        tblPr = table._tbl.find(qn("w:tblPr"))
-        if tblPr is None:
-            tblPr = OxmlElement("w:tblPr"); table._tbl.insert(0, tblPr)
-        for old in tblPr.findall(qn("w:tblW")): tblPr.remove(old)
-        tblW = OxmlElement("w:tblW")
-        tblW.set(qn("w:w"), str(sum(col_widths))); tblW.set(qn("w:type"),"dxa")
-        tblPr.append(tblW)
-        tblPr.append(OxmlElement("w:bidiVisual"))
-
-        for ri in range(n_rows_table):
-            for ci in range(n_cols):
-                cell = table.cell(ri, ci)
-                tc = cell._tc; tcPr = tc.get_or_add_tcPr()
-                for old in tcPr.findall(qn("w:tcW")): tcPr.remove(old)
-                tcW = OxmlElement("w:tcW")
-                tcW.set(qn("w:w"), str(col_widths[ci])); tcW.set(qn("w:type"),"dxa")
-                tcPr.append(tcW)
-
-        # ── שורות כותרת ─────────────────────────────────────────────────────
-        for hi in range(N_HDR):
-            set_row_height(table.rows[hi]._tr, HDR_H)
-            xl_hdr = xl_rows[hi]
-            skip_cols = set()
-            for ci in range(n_cols):
-                if ci in skip_cols: continue
-                xl_c = xl_hdr[ci] if ci < len(xl_hdr) else None
-                val  = xl_c.value if xl_c else ""
-                val_s = str(val).strip() if val is not None else ""
-                # בדוק TIER 1 בשורה 0
-                if hi == 0 and ci == 5 and val_s:
-                    t1lbl = val_s  # עדכן label
-                # מזג אופקית לפי Excel
-                span = get_xl_hmerge_span(hi, ci)
-                cell = table.cell(hi, ci)
-                if span > 1:
-                    set_hmerge(cell, span)
-                    for sc in range(ci+1, ci+span):
-                        if sc < n_cols:
-                            skip_cols.add(sc)
-                            # מחק תוכן תא המשך
-                            merged_cell = table.cell(hi, sc)
-                            merged_cell.paragraphs[0].clear()
-                            mc_tc = merged_cell._tc; mc_tcPr = mc_tc.get_or_add_tcPr()
-                            for old in mc_tcPr.findall(qn("w:shd")): mc_tcPr.remove(old)
-                write_cell(cell, val_s, bold=True, bg=HDR_BG, size_heb=9, size_eng=7)
-
-            # vMerge על שורות כותרת לעמודות שממוזגות אנכית באקסל (שורות 1+2)
-            # col 0,1 (קבוצה A/B), col 2 (שם), col 3 (CAS), col 4 (VSL), col 5 (TIER1)
-            # כל אלה ממוזגות אנכית rows 1-2 באקסל
-            if hi == 0:
-                for ci in range(min(6, n_cols)):
-                    set_vm(table.cell(0, ci), restart=True)
-                # שם קידוח ממוזג אנכית
-                drill_name_col = 8 if n_cols > 8 else n_cols - 1
-                if part_idx == 0:  # שמור לשימוש בכל חלק
-                    pass
-            elif hi == 1:
-                for ci in range(min(6, n_cols)):
-                    set_vm(table.cell(1, ci), restart=False)
-                    table.cell(1, ci).paragraphs[0].clear()
-
-        # ── שורות נתונים ─────────────────────────────────────────────────────
-        has_yel = False; has_org = False
-        # בנה מיפוי vMerge לעמודות קבוצה (col 0 ו-1) לפי מיזוגים באקסל
-        # בVOC עמודות A ו-B ממוזגות אנכית לפי קבוצות
-        col_a_merge = {}  # row_idx → (restart/continue/none)
-        col_b_merge = {}
-
-        for di, xl_row in enumerate(page_rows):
-            row_idx = N_HDR + di
-            set_row_height(table.rows[row_idx]._tr, ROW_H)
-
-            for ci in range(n_cols):
-                xl_c = xl_row[ci] if ci < len(xl_row) else None
-                val  = xl_c.value if xl_c else ""
-                bg   = get_color(xl_c) if xl_c else None
-                if bg is None: bg = WHITE
-                is_exceed = bg in (YELLOW, ORANGE)
-                if bg == YELLOW: has_yel = True
-                if bg == ORANGE: has_org = True
-
-                # עמודות קבוצה (A=0, B=1): vMerge לפי מיזוגים באקסל
-                if ci in (0, 1):
-                    xl_row_global = N_HDR + di  # שורה גלובלית (כולל כל הדפים)
-                    actual_xl_row = part_idx * rows_pp + di + N_HDR
-                    is_cont = is_xl_merged_continuation(actual_xl_row, ci)
-                    cell = table.cell(row_idx, ci)
-                    write_cell(cell, str(val) if not is_cont else "",
-                               bold=False, bg=bg, size_heb=9, size_eng=7)
-                    if is_cont:
-                        set_vm(cell, restart=False)
-                    elif val:
-                        set_vm(cell, restart=True)
-                elif ci == 2:  # שם תרכובת - שמאל
-                    cell = table.cell(row_idx, ci)
-                    write_cell(cell, str(val) if val is not None else "",
-                               bg=bg, bold=is_exceed, size_heb=9, size_eng=7, align="right")
-                else:
-                    cell = table.cell(row_idx, ci)
-                    write_cell(cell, str(val) if val is not None else "",
-                               bg=bg, bold=is_exceed, size_heb=9, size_eng=7)
-
-        # ── מקרא ─────────────────────────────────────────────────────────────
-        lp = doc.add_paragraph()
-        lp.paragraph_format.space_before = Pt(4)
-        lp.paragraph_format.space_after  = Pt(0)
-        lp_pPr = lp._p.get_or_add_pPr()
-        for old in lp_pPr.findall(_w("jc")): lp_pPr.remove(old)
-        for old in lp_pPr.findall(_w("bidi")): lp_pPr.remove(old)
-        jc_lp = _lxml.SubElement(lp_pPr, _w("jc")); jc_lp.set(_w("val"),"right")
-        if has_yel:
-            leg_run(lp, "בצהוב", "FFFF00")
-            leg_run(lp, " - חריגה מערך הסף VSL", plain=True)
-        if has_yel and has_org:
-            leg_run(lp, "     ", plain=True)
-        if has_org:
-            leg_run(lp, "בכתום", "FFC000")
-            leg_run(lp, " - חריגה מערך הסף TIER 1", plain=True)
-
-    buf = io.BytesIO(); doc.save(buf); buf.seek(0)
-    return buf.getvalue()
-
-
-def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
-    """בונה דוח Word לטבלת PFAS - זהה ל-VOC עם התאמות"""
-    import io, re
-    from lxml import etree as _lxml
-    from docx import Document
-    from docx.shared import Pt, Twips, Inches, Emu, RGBColor
-    from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
-    from docx.enum.section import WD_ORIENT
-    from docx.oxml.ns import qn
-    from docx.oxml import OxmlElement
-    import openpyxl
-
-    YELLOW = "FFFF00"
-    ORANGE = "FFC000"
-    WHITE  = "FFFFFF"
-    HDR_BG = "B7D7F0"
-    N_HDR  = 2
-
-    wb = openpyxl.load_workbook(io.BytesIO(xl_file_bytes), data_only=True)
-    ws = None
-    for name in wb.sheetnames:
-        if "pfas" in name.lower() or "fluor" in name.lower():
-            ws = wb[name]; break
-    if ws is None: ws = wb.active
-
-    xl_rows = list(ws.iter_rows())
-    if not xl_rows: raise ValueError("הקובץ ריק")
-
-    n_raw = len(xl_rows[0])
-    non_empty_cols = [ci for ci in range(n_raw)
-                      if any(xl_rows[ri][ci].value not in (None,"","-")
-                             for ri in range(len(xl_rows)))]
-    xl_rows = [[row[ci] for ci in non_empty_cols] for row in xl_rows]
-    n_cols = len(xl_rows[0])
-
-    # PFAS: col 3 = TIER 1 label (0-indexed)
-    t1lbl = "TIER 1"
-    if len(xl_rows[0]) > 3 and xl_rows[0][3].value:
-        t1lbl = str(xl_rows[0][3].value).strip()
-
-    xl_merges = []
-    for mr in ws.merged_cells.ranges:
-        xl_merges.append((mr.min_row, mr.min_col, mr.max_row, mr.max_col))
-
-    def get_color(cell):
-        try:
-            fill = cell.fill
-            if fill and fill.fill_type not in (None,"none"):
-                fg = fill.fgColor
-                if fg.type=="rgb":
-                    h = fg.rgb[-6:].upper()
-                    if h == YELLOW: return YELLOW
-                    if h == ORANGE: return ORANGE
-        except: pass
-        return None
-
-    def fmt_val(raw):
-        if raw is None: return ""
-        s = str(raw).strip()
-        if not s or s=="-": return s
-        if s.startswith("<"): return s
-        try:
-            f = float(s)
-            if f == int(f) and abs(f) >= 1000: return f"{int(f):,}"
-            elif abs(f) >= 1000: return f"{f:,.1f}"
-        except: pass
-        return s
-
-    def has_heb(text):
-        t = str(text).strip()
-        if not t: return False
-        if any("\\u05d0"<=c<="\\u05ea" for c in t): return True
-        if any(c.isalpha() for c in t): return False
-        return True
-
-    _W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-    def _w(tag): return f"{{{_W}}}{tag}"
-
-    def set_page(section):
-        if landscape:
-            section.orientation = WD_ORIENT.LANDSCAPE
-            section.page_width  = Inches(17); section.page_height = Inches(11)
-        else:
-            section.orientation = WD_ORIENT.PORTRAIT
-            section.page_width  = Inches(8.5); section.page_height = Inches(11)
-        for a in ("left_margin","right_margin","top_margin","bottom_margin"):
-            setattr(section, a, Inches(0.4))
-
-    def set_bg(cell, hex_color):
-        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
-        for old in tcPr.findall(qn("w:shd")): tcPr.remove(old)
-        shd = OxmlElement("w:shd")
-        shd.set(qn("w:val"),"clear"); shd.set(qn("w:color"),"auto")
-        shd.set(qn("w:fill"), hex_color); tcPr.append(shd)
-
-    def set_brd(cell):
-        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
-        for old in tcPr.findall(qn("w:tcBorders")): tcPr.remove(old)
-        borders = OxmlElement("w:tcBorders")
-        for side in ("top","left","bottom","right"):
-            b = OxmlElement(f"w:{side}")
-            b.set(qn("w:val"),"single"); b.set(qn("w:sz"),"4")
-            b.set(qn("w:space"),"0"); b.set(qn("w:color"),"000000")
-            borders.append(b)
-        tcPr.append(borders)
-
-    def set_row_height(tr, h_twips):
-        trPr = tr.find(qn("w:trPr"))
-        if trPr is None:
-            trPr = OxmlElement("w:trPr"); tr.insert(0, trPr)
-        for old in trPr.findall(qn("w:trHeight")): trPr.remove(old)
-        trH = OxmlElement("w:trHeight")
-        trH.set(qn("w:val"), str(h_twips)); trH.set(qn("w:hRule"), "exact")
-        trPr.append(trH)
-
-    def set_vm(cell, restart=False):
-        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
-        for old in tcPr.findall(qn("w:vMerge")): tcPr.remove(old)
-        vm = OxmlElement("w:vMerge")
-        if restart: vm.set(qn("w:val"), "restart")
-        tcPr.append(vm)
-
-    def set_hmerge(cell, span):
-        if span <= 1: return
-        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
-        for old in tcPr.findall(qn("w:gridSpan")): tcPr.remove(old)
-        gs = OxmlElement("w:gridSpan"); gs.set(qn("w:val"), str(span))
-        tcPr.append(gs)
-
-    def add_run(para, text, bold=False, size_heb=9, size_eng=7, color_hex=None):
-        if not str(text): return
-        lines = str(text).split("\\n")
-        use_heb = has_heb(text)
-        fname   = "David" if use_heb else "Times New Roman"
-        fsize   = str(size_heb*2) if use_heb else str(size_eng*2)
-        def _mk_run(txt):
-            r = _lxml.SubElement(para._p, _w("r"))
-            rPr = _lxml.SubElement(r, _w("rPr"))
-            rF = _lxml.SubElement(rPr, _w("rFonts"))
-            for a in ("ascii","hAnsi","cs","eastAsia"): rF.set(_w(a), fname)
-            if bold:
-                _lxml.SubElement(rPr, _w("b")).set(_w("val"),"1")
-                _lxml.SubElement(rPr, _w("bCs")).set(_w("val"),"1")
-            _lxml.SubElement(rPr, _w("sz")).set(_w("val"), fsize)
-            _lxml.SubElement(rPr, _w("szCs")).set(_w("val"), fsize)
-            _lxml.SubElement(rPr, _w("rtl"))
-            t = _lxml.SubElement(r, _w("t"))
-            t.set("{http://www.w3.org/XML/1998/namespace}space","preserve")
-            t.text = txt
-        def _mk_br():
-            _lxml.SubElement(_lxml.SubElement(para._p, _w("r")), _w("br"))
-        for i, line in enumerate(lines):
-            if i > 0: _mk_br()
-            _mk_run(line)
-
-    def write_cell(cell, text, bold=False, bg=WHITE, size_heb=9, size_eng=7, align="center"):
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        set_bg(cell, bg); set_brd(cell)
-        p = cell.paragraphs[0]; p.clear()
-        p.paragraph_format.space_before = Pt(0)
-        p.paragraph_format.space_after  = Pt(0)
-        pPr = p._p.get_or_add_pPr()
-        pPr.append(OxmlElement("w:bidi"))
-        jc = OxmlElement("w:jc"); jc.set(qn("w:val"), align); pPr.append(jc)
-        raw = str(text or "")
-        txt = raw if any("\\u05d0"<=c<="\\u05ea" for c in raw) else fmt_val(raw)
-        if not txt: return
-        add_run(p, txt, bold=bold, size_heb=size_heb, size_eng=size_eng)
-
-    def get_xl_hmerge_span(row_0idx, col_0idx):
-        r = row_0idx + 1; c = non_empty_cols[col_0idx] + 1
-        for mr_min_row, mr_min_col, mr_max_row, mr_max_col in xl_merges:
-            if mr_min_row == r and mr_min_col == c:
-                span = sum(1 for oc in non_empty_cols if mr_min_col <= oc+1 <= mr_max_col)
-                return max(1, span)
-        return 1
-
-    def is_xl_merged_continuation(row_0idx, col_0idx):
-        r = row_0idx + 1; c = non_empty_cols[col_0idx] + 1
-        for mr_min_row, mr_min_col, mr_max_row, mr_max_col in xl_merges:
-            if (mr_min_row <= r <= mr_max_row and
-                mr_min_col <= c <= mr_max_col and
-                not (r == mr_min_row and c == mr_min_col)):
-                return True
-        return False
-
-    # PFAS: cols 0-5 fixed (שם,CAS,VSL,TIER1,יחידות,LOR), col 6=שם קידוח, cols 7+=samples
-    n_fixed = 7
-    n_sample = max(1, n_cols - n_fixed)
-    usable_w = int((17-0.8)*914400) if landscape else int((8.5-0.8)*914400)
-    fixed_w  = int(usable_w * 0.45)
-    sample_w = usable_w - fixed_w
-    fixed_ratios = [14, 6, 5, 7, 4, 5, 6]
-    rs = sum(fixed_ratios[:n_fixed])
-    col_widths = [int(fixed_w * r / rs) for r in fixed_ratios[:n_fixed]]
-    each_sample = max(1, sample_w // n_sample)
-    col_widths += [each_sample] * n_sample
-    col_widths[-1] += usable_w - sum(col_widths)
-
-    data_xl_rows = xl_rows[N_HDR:]
-    ROW_H   = 260
-    HDR_H   = 360
-    rows_pp = max(15, int((14688 - 400 - 480 - 320 - N_HDR*HDR_H) / ROW_H))
-
-    pages = []
-    for i in range(0, max(1, len(data_xl_rows)), rows_pp):
-        pages.append(data_xl_rows[i:i+rows_pp])
-    total_parts = len(pages)
-
-    doc = Document()
-    _W_DEF = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-    styles = doc.element.find(f"{{{_W_DEF}}}styles")
-    if styles is not None:
-        for b in styles.findall(f'.//{{{_W_DEF}}}b[@{{{_W_DEF}}}val="0"]'):
-            b.getparent().remove(b)
-        for b in styles.findall(f'.//{{{_W_DEF}}}bCs[@{{{_W_DEF}}}val="0"]'):
-            b.getparent().remove(b)
-    for p in doc.paragraphs:
-        p._element.getparent().remove(p._element)
-
-    def _title_segments(txt):
-        parts = re.split(r"([A-Za-z]+)", txt)
-        return [(p, bool(re.match(r"^[A-Za-z]+$", p))) for p in parts if p]
-
-    def _add_title_run(parent_p, text, is_eng):
-        fname = "Times New Roman" if is_eng else "David"
-        fsize = "22" if is_eng else "26"
-        r = _lxml.SubElement(parent_p, _w("r"))
-        rPr = _lxml.SubElement(r, _w("rPr"))
-        rF = _lxml.SubElement(rPr, _w("rFonts"))
-        for a in ("ascii","hAnsi","cs","eastAsia"): rF.set(_w(a), fname)
-        _lxml.SubElement(rPr, _w("b")).set(_w("val"),"1")
-        _lxml.SubElement(rPr, _w("bCs")).set(_w("val"),"1")
-        _lxml.SubElement(rPr, _w("u")).set(_w("val"),"single")
-        _lxml.SubElement(rPr, _w("sz")).set(_w("val"), fsize)
-        _lxml.SubElement(rPr, _w("szCs")).set(_w("val"), fsize)
-        _lxml.SubElement(rPr, _w("rtl"))
-        t = _lxml.SubElement(r, _w("t"))
-        t.set("{http://www.w3.org/XML/1998/namespace}space","preserve")
-        t.text = text
-
-    def leg_run(para, word, hex_color=None, plain=False):
-        r = _lxml.SubElement(para._p, _w("r"))
-        rPr = _lxml.SubElement(r, _w("rPr"))
-        rF = _lxml.SubElement(rPr, _w("rFonts"))
-        for a in ("ascii","hAnsi","cs","eastAsia"): rF.set(_w(a),"David")
-        if not plain:
-            _lxml.SubElement(rPr, _w("b")).set(_w("val"),"1")
-            _lxml.SubElement(rPr, _w("bCs")).set(_w("val"),"1")
-            shd = _lxml.SubElement(rPr, _w("shd"))
-            shd.set(_w("val"),"clear"); shd.set(_w("color"),"auto")
-            shd.set(_w("fill"), hex_color)
-        _lxml.SubElement(rPr, _w("sz")).set(_w("val"),"18")
-        _lxml.SubElement(rPr, _w("szCs")).set(_w("val"),"18")
-        _lxml.SubElement(rPr, _w("rtl"))
-        t = _lxml.SubElement(r, _w("t"))
-        t.set("{http://www.w3.org/XML/1998/namespace}space","preserve")
-        t.text = word
-
-    import re
-
-    for part_idx, page_rows in enumerate(pages):
-        pn    = part_idx + 1
-        pts   = f"(חלק {pn} מתוך {total_parts})" if total_parts > 1 else ""
-        title = f"טבלה מספר {table_num} {pts} – תוצאות אנליזות PFAS".strip()
-
-        section = doc.sections[0] if part_idx == 0 else doc.add_section()
-        set_page(section)
-
-        tp = doc.add_paragraph()
-        tp.paragraph_format.space_before = Pt(0)
-        tp.paragraph_format.space_after  = Pt(0)
-        tp.paragraph_format.keep_with_next = True
-        pPr = tp._p.get_or_add_pPr()
-        _lxml.SubElement(pPr, _w("bidi"))
-        jc = _lxml.SubElement(pPr, _w("jc")); jc.set(_w("val"),"center")
-        for seg, is_eng in _title_segments(title):
-            _add_title_run(tp._p, seg, is_eng)
-
-        sp_p = doc.add_paragraph()
-        sp_p.paragraph_format.space_before = Pt(0)
-        sp_p.paragraph_format.space_after  = Pt(0)
-        sp_p.paragraph_format.line_spacing = Pt(19.5)
-        sp_p.paragraph_format.keep_with_next = True
-
-        n_rows_table = N_HDR + len(page_rows)
-        table = doc.add_table(rows=n_rows_table, cols=n_cols)
-        table.alignment = WD_TABLE_ALIGNMENT.CENTER
-
-        tblPr = table._tbl.find(qn("w:tblPr"))
-        if tblPr is None:
-            tblPr = OxmlElement("w:tblPr"); table._tbl.insert(0, tblPr)
-        for old in tblPr.findall(qn("w:tblW")): tblPr.remove(old)
-        tblW = OxmlElement("w:tblW")
-        tblW.set(qn("w:w"), str(sum(col_widths))); tblW.set(qn("w:type"),"dxa")
-        tblPr.append(tblW)
-        tblPr.append(OxmlElement("w:bidiVisual"))
-
-        for ri in range(n_rows_table):
-            for ci in range(n_cols):
-                cell = table.cell(ri, ci)
-                tc = cell._tc; tcPr = tc.get_or_add_tcPr()
-                for old in tcPr.findall(qn("w:tcW")): tcPr.remove(old)
-                tcW = OxmlElement("w:tcW")
-                tcW.set(qn("w:w"), str(col_widths[ci])); tcW.set(qn("w:type"),"dxa")
-                tcPr.append(tcW)
-
-        # ── שורות כותרת ─────────────────────────────────────────────────────
-        for hi in range(N_HDR):
-            set_row_height(table.rows[hi]._tr, HDR_H)
-            xl_hdr = xl_rows[hi]
-            skip_cols = set()
-            for ci in range(n_cols):
-                if ci in skip_cols: continue
-                xl_c = xl_hdr[ci] if ci < len(xl_hdr) else None
-                val  = xl_c.value if xl_c else ""
-                val_s = str(val).strip() if val is not None else ""
-                span = get_xl_hmerge_span(hi, ci)
-                cell = table.cell(hi, ci)
-                if span > 1:
-                    set_hmerge(cell, span)
-                    for sc in range(ci+1, ci+span):
-                        if sc < n_cols:
-                            skip_cols.add(sc)
-                            table.cell(hi, sc).paragraphs[0].clear()
-                write_cell(cell, val_s, bold=True, bg=HDR_BG, size_heb=9, size_eng=7)
-            # vMerge לעמודות fixed (0-5 = שם,CAS,VSL,TIER1,יחידות,LOR)
-            if hi == 0:
-                for ci in range(min(6, n_cols)):
-                    set_vm(table.cell(0, ci), restart=True)
-            elif hi == 1:
-                for ci in range(min(6, n_cols)):
-                    set_vm(table.cell(1, ci), restart=False)
-                    table.cell(1, ci).paragraphs[0].clear()
-
-        # ── שורות נתונים ─────────────────────────────────────────────────────
-        has_yel = False; has_org = False
-        for di, xl_row in enumerate(page_rows):
-            row_idx = N_HDR + di
-            set_row_height(table.rows[row_idx]._tr, ROW_H)
-            for ci in range(n_cols):
-                xl_c = xl_row[ci] if ci < len(xl_row) else None
-                val  = xl_c.value if xl_c else ""
-                bg   = get_color(xl_c) if xl_c else None
-                if bg is None: bg = WHITE
-                is_exceed = bg in (YELLOW, ORANGE)
-                if bg == YELLOW: has_yel = True
-                if bg == ORANGE: has_org = True
-                align = "right" if ci == 0 else "center"
-                write_cell(table.cell(row_idx, ci), str(val) if val is not None else "",
-                           bg=bg, bold=is_exceed, size_heb=9, size_eng=7, align=align)
-
-        lp = doc.add_paragraph()
-        lp.paragraph_format.space_before = Pt(4)
-        lp.paragraph_format.space_after  = Pt(0)
-        lp_pPr = lp._p.get_or_add_pPr()
-        for old in lp_pPr.findall(_w("jc")): lp_pPr.remove(old)
-        for old in lp_pPr.findall(_w("bidi")): lp_pPr.remove(old)
-        jc_lp = _lxml.SubElement(lp_pPr, _w("jc")); jc_lp.set(_w("val"),"right")
-        if has_yel:
-            leg_run(lp, "בצהוב", "FFFF00")
-            leg_run(lp, " - חריגה מערך הסף VSL", plain=True)
-        if has_yel and has_org:
-            leg_run(lp, "     ", plain=True)
-        if has_org:
-            leg_run(lp, "בכתום", "FFC000")
-            leg_run(lp, " - חריגה מערך הסף TIER 1", plain=True)
-
-    buf = io.BytesIO(); doc.save(buf); buf.seek(0)
-    return buf.getvalue()
-
-
-with tab_excel:
-    # ── SIDEBAR
-    st.sidebar.header("⚙️ הגדרות ערכי סף")
-    st.sidebar.markdown("🟡 חריגה מ-VSL &nbsp;&nbsp;&nbsp; 🟠 חריגה מ-TIER 1")
-    st.sidebar.markdown("---")
-    land_use=st.sidebar.selectbox("Land Use",["Industrial","Residential"],index=0)
-    aquifer=st.sidebar.selectbox("Aquifer Sensitivity",["A-1, A, B","B-1 or C"],index=0)
-    depth_opts=["Not Applicable"] if "b-1" in aquifer.lower() else ["0 - 6 m",">6 m"]
-    depth=st.sidebar.selectbox("Depth to Groundwater",depth_opts,index=0)
-    t1col=get_tier1_col(land_use,aquifer,depth)
-    t1lbl=tier1_label(land_use,aquifer,depth)
-    st.sidebar.info(f"TIER 1: **{land_use}** | {aquifer} | {depth}")
-
-    c1,c2=st.columns(2)
-    with c1:
-        st.subheader("📁 קובץ ערכי סף")
-        thr_file=st.file_uploader("העלה קובץ ערכי הסף המאוחד",type=["xlsx","xls"],key="thr")
-    with c2:
-        st.subheader("📂 קבצי ALS")
-        data_files=st.file_uploader("העלה קבצי ALS",type=["xlsx","xls"],accept_multiple_files=True,key="data")
-
-    if not thr_file:
-        st.info("👆 העלה קובץ ערכי סף וקבצי ALS")
-    elif not data_files:
-        st.warning("⚠️ העלה קבצי ALS")
-    else:
-        thresh_dict=load_threshold_file(thr_file.read())
-        st.success(f"✅ {len(thresh_dict)-1} ערכי סף | {land_use} | {aquifer} | {depth}")
-        all_data=[]
-        for f in data_files:
-            df,err=parse_als_file(f.read(),f.name)
-            if err: st.warning(f"⚠️ {f.name}: {err}")
-            else: all_data.append(df); st.success(f"✅ {f.name} — {len(df)} תוצאות")
-        if not all_data:
-            st.error("לא נטענו נתונים.")
-        else:
-            df_all=pd.concat(all_data,ignore_index=True)
-            with st.expander(f"👁️ תצוגה מקדימה ({len(df_all)} שורות)"): st.dataframe(df_all.head(30),use_container_width=True)
-            with st.expander("קבוצות שנמצאו"): st.write(df_all["group"].unique().tolist())
-            def dg(kw): return df_all[df_all["group"].str.contains("|".join(kw),case=False,na=False)]
-            tph_df   =dg(["petroleum","tph","hydrocarbon"])
-            metals_df=dg(["metal","cation","extractable"])
-            pfas_df  =dg(["perfluor","pfas","fluorin"])
-            voc_df   =dg(["voc","svoc","btex","aromatic","halogenated","volatile",
-                           "alcohol","aldehyde","ketone","phenol","pah","aniline",
-                           "nitro","phthalate","pesticide","pcb","other"])
-            wb_out=Workbook(); wb_out.remove(wb_out.active)
-            if not tph_df.empty:
-                write_tph_sheet(wb_out.create_sheet("TPH"),tph_df,thresh_dict,t1col,t1lbl)
-                st.info(f"✅ TPH: {tph_df['sample_id'].nunique()} קידוחים")
-            if not metals_df.empty:
-                write_metals_sheet(wb_out.create_sheet("Metals"),metals_df,thresh_dict,t1col,t1lbl)
-                st.info(f"✅ Metals: {metals_df['sample_id'].nunique()} קידוחים")
-            if not voc_df.empty:
-                write_voc_sheet(wb_out.create_sheet("VOC+SVOC"),voc_df,thresh_dict,t1col,t1lbl)
-                st.info(f"✅ VOC+SVOC: {voc_df['sample_id'].nunique()} קידוחים")
-            if not pfas_df.empty:
-                write_pfas_sheet(wb_out.create_sheet("PFAS"),pfas_df,thresh_dict,t1col,t1lbl)
-                st.info(f"✅ PFAS: {pfas_df['sample_id'].nunique()} קידוחים")
-            if not wb_out.sheetnames:
-                wb_out.create_sheet("Results"); st.warning("לא זוהו קבוצות")
-            st.markdown("---")
-
-            # ── קובץ משולב ───────────────────────────────────────────────────
-            buf=io.BytesIO(); wb_out.save(buf); buf.seek(0)
-            st.download_button("⬇️ הורד קובץ Excel מלא (כל הגיליונות)",data=buf,file_name="soil_report.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-
-            # ── קבצים נפרדים לכל סוג ─────────────────────────────────────────
-            st.markdown("**⬇️ הורד קבצים נפרדים:**")
-            dl_cols = st.columns(4)
-
-            def make_single_wb(write_fn, df, name):
-                """בנה workbook עם גיליון אחד"""
-                wb = Workbook(); wb.remove(wb.active)
-                write_fn(wb.create_sheet(name), df, thresh_dict, t1col, t1lbl)
-                b = io.BytesIO(); wb.save(b); b.seek(0)
-                return b
-
-            if not tph_df.empty:
-                with dl_cols[0]:
-                    st.download_button("🛢️ TPH",
-                        data=make_single_wb(write_tph_sheet, tph_df, "TPH"),
-                        file_name="TPH.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True)
-            if not metals_df.empty:
-                with dl_cols[1]:
-                    st.download_button("⚗️ Metals",
-                        data=make_single_wb(write_metals_sheet, metals_df, "Metals"),
-                        file_name="Metals.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True)
-            if not voc_df.empty:
-                with dl_cols[2]:
-                    st.download_button("🧪 VOC+SVOC",
-                        data=make_single_wb(write_voc_sheet, voc_df, "VOC+SVOC"),
-                        file_name="VOC_SVOC.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True)
-            if not pfas_df.empty:
-                with dl_cols[3]:
-                    st.download_button("🔬 PFAS",
-                        data=make_single_wb(write_pfas_sheet, pfas_df, "PFAS"),
-                        file_name="PFAS.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True)
-
-
-
-
-with tab_word:
-    st.header("📄 יצוא דוח Word")
-    st.caption("העלה קובץ Excel מעובד מטאב Excel, בחר מספר טבלה וצור דוח Word")
-    st.markdown("---")
-
-    # ── TPH ──────────────────────────────────────────────────────────────────
-    with st.expander("🛢️ טבלת TPH", expanded=True):
-        wc1, wc2, wc3 = st.columns([4,1,1])
-        with wc1:
-            tph_file = st.file_uploader("העלה קובץ Excel של TPH", type=["xlsx","xls"], key="wtph")
-        with wc2:
-            tph_num  = st.number_input("מספר טבלה", min_value=1, max_value=99, value=1, step=1, key="wtph_num")
-            tph_page = st.selectbox("סוג דף", ["A4","Tabloid"], key="wtph_page")
-        with wc3:
-            tph_land = st.selectbox("כיוון", ["לאורך","לרוחב"], key="wtph_land") == "לרוחב"
-        if tph_file:
-            if st.button("📄 צור דוח Word – TPH", type="primary", use_container_width=True, key="btn_tph"):
-                try:
-                    with st.spinner("⏳ בונה דוח..."):
-                        docx_bytes = build_tph_word(tph_file.read(), int(tph_num), tph_page, tph_land)
-                    st.success("✅ הדוח נוצר!")
-                    st.download_button("⬇️ הורד דוח Word – TPH", data=docx_bytes,
-                        file_name=f"TPH_table_{tph_num}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True, key="dl_tph")
-                except Exception as e:
-                    st.error(f"❌ שגיאה: {e}")
-                    import traceback; st.code(traceback.format_exc())
-        else:
-            st.info("👆 העלה קובץ Excel של TPH")
-
-    # ── Metals ───────────────────────────────────────────────────────────────
-    with st.expander("⚗️ טבלת Metals"):
-        wm1, wm2, wm3, wm4 = st.columns([4,1,1,1])
-        with wm1:
-            metals_file = st.file_uploader("העלה קובץ Excel של Metals", type=["xlsx","xls"], key="wmetals")
-        with wm2:
-            metals_num  = st.number_input("מספר טבלה", min_value=1, max_value=99, value=5, step=1, key="wmetals_num")
-        with wm3:
-            metals_page = st.selectbox("סוג דף", ["A3","A4","Tabloid"], key="wmetals_page")
-        with wm4:
-            metals_land = st.selectbox("כיוון", ["לרוחב","לאורך"], key="wmetals_land") == "לרוחב"
-        if metals_file:
-            if st.button("📄 צור דוח Word – Metals", type="primary", use_container_width=True, key="btn_metals"):
-                try:
-                    with st.spinner("⏳ בונה דוח..."):
-                        docx_bytes = build_metals_word(metals_file.read(), int(metals_num), page_size=metals_page, landscape=metals_land)
-                    st.success("✅ הדוח נוצר!")
-                    st.download_button("⬇️ הורד דוח Word – Metals", data=docx_bytes,
-                        file_name=f"Metals_table_{metals_num}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True, key="dl_metals")
-                except Exception as e:
-                    st.error(f"❌ שגיאה: {e}")
-                    import traceback; st.code(traceback.format_exc())
-        else:
-            st.info("👆 העלה קובץ Excel של Metals")
-
-    # ── VOC+SVOC ──────────────────────────────────────────────────────────────
-    with st.expander("🧪 טבלת VOC+SVOC"):
-        wv1, wv2, wv3, wv4 = st.columns([4,1,1,1])
-        with wv1:
-            voc_file = st.file_uploader("העלה קובץ Excel של VOC+SVOC", type=["xlsx","xls"], key="wvoc")
-        with wv2:
-            voc_num  = st.number_input("מספר טבלה", min_value=1, max_value=99, value=3, step=1, key="wvoc_num")
-        with wv3:
-            voc_page = st.selectbox("סוג דף", ["A3","A4","Tabloid"], key="wvoc_page")
-        with wv4:
-            voc_land = st.selectbox("כיוון", ["לרוחב","לאורך"], key="wvoc_land") == "לרוחב"
-        if voc_file:
-            if st.button("📄 צור דוח Word – VOC+SVOC", type="primary", use_container_width=True, key="btn_voc"):
-                try:
-                    with st.spinner("⏳ בונה דוח..."):
-                        docx_bytes = build_voc_word(voc_file.read(), int(voc_num), page_size=voc_page, landscape=voc_land)
-                    st.success("✅ הדוח נוצר!")
-                    st.download_button("⬇️ הורד דוח Word – VOC+SVOC", data=docx_bytes,
-                        file_name=f"VOC_table_{voc_num}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True, key="dl_voc")
-                except Exception as e:
-                    st.error(f"❌ שגיאה: {e}")
-                    import traceback; st.code(traceback.format_exc())
-        else:
-            st.info("👆 העלה קובץ Excel של VOC+SVOC")
-
-    # ── PFAS ──────────────────────────────────────────────────────────────────
-    with st.expander("🔬 טבלת PFAS"):
-        wp1, wp2, wp3, wp4 = st.columns([4,1,1,1])
-        with wp1:
-            pfas_file = st.file_uploader("העלה קובץ Excel של PFAS", type=["xlsx","xls"], key="wpfas")
-        with wp2:
-            pfas_num  = st.number_input("מספר טבלה", min_value=1, max_value=99, value=4, step=1, key="wpfas_num")
-        with wp3:
-            pfas_page = st.selectbox("סוג דף", ["A3","A4","Tabloid"], key="wpfas_page")
-        with wp4:
-            pfas_land = st.selectbox("כיוון", ["לרוחב","לאורך"], key="wpfas_land") == "לרוחב"
-        if pfas_file:
-            if st.button("📄 צור דוח Word – PFAS", type="primary", use_container_width=True, key="btn_pfas"):
-                try:
-                    with st.spinner("⏳ בונה דוח..."):
-                        docx_bytes = build_pfas_word(pfas_file.read(), int(pfas_num), page_size=pfas_page, landscape=pfas_land)
-                    st.success("✅ הדוח נוצר!")
-                    st.download_button("⬇️ הורד דוח Word – PFAS", data=docx_bytes,
-                        file_name=f"PFAS_table_{pfas_num}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True, key="dl_pfas")
-                except Exception as e:
-                    st.error(f"❌ שגיאה: {e}")
-                    import traceback; st.code(traceback.format_exc())
-        else:
-            st.info("👆 העלה קובץ Excel של PFAS")
 
 def build_generic_transposed_word(xl_file_bytes, table_num, title_suffix,
                                    n_info_cols, n_hdr_rows,
+                                   hdr_color="8DB4E2", group_color="DCE6F1",
                                    page_size="A3", landscape=True):
     """
-    בונה Word לטבלאות 'מסובבות' - שורות=תרכובות, עמודות=קידוחים (VOC/PFAS)
-    קורא מהאקסל כפי שהוא ושומר merges, צבעים, טקסט.
+    בונה Word לטבלאות transposed (שורות=תרכובות, עמודות=קידוחים).
+    קורא ישירות מהאקסל ושומר merges, צבעים ומבנה.
     """
     import io, re
     from lxml import etree as _lxml
     from docx import Document
-    from docx.shared import Pt, Inches, Emu, Twips
+    from docx.shared import Pt, Emu, Twips
     from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
     from docx.enum.section import WD_ORIENT
     from docx.oxml.ns import qn
@@ -3453,44 +2412,49 @@ def build_generic_transposed_word(xl_file_bytes, table_num, title_suffix,
     YELLOW = "FFFF00"
     ORANGE = "FFC000"
     WHITE  = "FFFFFF"
-    HDR_BG = "B7D7F0"
+    HDR_BG = hdr_color
+    GRP_BG = group_color
 
     _W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
     def _w(tag): return f'{{{_W}}}{tag}'
 
     wb = openpyxl.load_workbook(io.BytesIO(xl_file_bytes), data_only=True)
     ws = wb.active
-    if ws is None or ws.max_row < 1:
-        raise ValueError("הקובץ ריק")
-
     n_rows = ws.max_row
     n_cols = ws.max_column
 
-    # ── מיפוי תאים ממוזגים ─────────────────────────────────────────────────
-    merge_map = {}   # (r,c) → (min_r, min_c, max_r, max_c) - master cell
-    skip_set  = set()  # תאים שצריך לדלג (חלק ממיזוג)
+    # ── מיפוי מיזוגים ─────────────────────────────────────────────────────────
+    # master_map[(r,c)] = (min_r,min_c,max_r,max_c)
+    # skip_set = תאים שאינם master
+    master_map = {}
+    skip_set   = set()
     for rng in ws.merged_cells.ranges:
-        for r in range(rng.min_row, rng.max_row + 1):
-            for c in range(rng.min_col, rng.max_col + 1):
-                merge_map[(r,c)] = (rng.min_row, rng.min_col, rng.max_row, rng.max_col)
+        for r in range(rng.min_row, rng.max_row+1):
+            for c in range(rng.min_col, rng.max_col+1):
+                master_map[(r,c)] = (rng.min_row, rng.min_col, rng.max_row, rng.max_col)
                 if r != rng.min_row or c != rng.min_col:
-                    skip_set.add((r, c))
+                    skip_set.add((r,c))
 
-    def get_cell_bg(xl_cell):
+    def xl_bg(cell):
+        """מחזיר צבע רקע תא Excel כ-hex 6 תווים, None אם לבן/שקוף"""
         try:
-            fill = xl_cell.fill
-            if fill and fill.fill_type not in (None,'none'):
+            fill = cell.fill
+            if fill and fill.fill_type not in (None, 'none'):
                 fg = fill.fgColor
                 if fg.type == 'rgb':
                     h = fg.rgb[-6:].upper()
                     if h not in ('FFFFFF','000000',''):
-                        if h == YELLOW: return YELLOW
-                        if h == ORANGE: return ORANGE
-                        if h.startswith('B') or h in ('BDD7EE','DAEEF3','9DC3E6',
-                                                        '2E75B6','4472C4','00B0F0',
-                                                        'B7D7F0'): return HDR_BG
-            return None
-        except: return None
+                        return h
+        except: pass
+        return None
+
+    def is_hdr_color(h):
+        return h and h.upper() in (HDR_BG.upper(), '8DB4E2','0070C0','2E75B6',
+                                    'B7D7F0','BDD7EE','9DC3E6','DAEEF3',
+                                    '4472C4','00B0F0', '70AD47')
+
+    def is_grp_color(h):
+        return h and h.upper() in (GRP_BG.upper(), 'DCE6F1','D9E2F3','EBF0FA')
 
     def has_heb(text):
         t = str(text).strip()
@@ -3499,37 +2463,36 @@ def build_generic_transposed_word(xl_file_bytes, table_num, title_suffix,
         if any(c.isalpha() for c in t): return False
         return True
 
-    # גודל דף
+    # ── גודל דף ────────────────────────────────────────────────────────────────
     PAGE = {
-        "A3":     (int(16.54*914400), int(11.69*914400)),
-        "A4":     (int(11.69*914400), int(8.27*914400)),
-        "Tabloid":(int(17*914400),    int(11*914400)),
+        "A3":      (int(16.54*914400), int(11.69*914400)),
+        "A4":      (int(11.69*914400), int(8.27*914400)),
+        "Tabloid": (int(17*914400),    int(11*914400)),
     }
     pw, ph = PAGE.get(page_size, PAGE["A3"])
-    if landscape:
-        page_w, page_h = max(pw,ph), min(pw,ph)
-    else:
-        page_w, page_h = min(pw,ph), max(pw,ph)
-    MARGIN = int(0.4 * 914400)
+    page_w = max(pw,ph) if landscape else min(pw,ph)
+    page_h = min(pw,ph) if landscape else max(pw,ph)
+    MARGIN    = int(0.4 * 914400)
     content_w = page_w - 2 * MARGIN
 
     def set_page(section):
-        section.orientation = WD_ORIENT.LANDSCAPE if landscape else WD_ORIENT.PORTRAIT
+        section.orientation  = WD_ORIENT.LANDSCAPE if landscape else WD_ORIENT.PORTRAIT
         section.page_width   = page_w
         section.page_height  = page_h
-        for attr in ('left_margin','right_margin','top_margin','bottom_margin'):
-            setattr(section, attr, MARGIN)
+        for a in ('left_margin','right_margin','top_margin','bottom_margin'):
+            setattr(section, a, MARGIN)
 
-    def set_bg(cell, hex_color):
-        tcPr = cell._tc.get_or_add_tcPr()
+    # ── עזרי Word ──────────────────────────────────────────────────────────────
+    def set_bg(wc, hex_color):
+        tcPr = wc._tc.get_or_add_tcPr()
         for old in tcPr.findall(qn('w:shd')): tcPr.remove(old)
         shd = OxmlElement('w:shd')
         shd.set(qn('w:val'),'clear'); shd.set(qn('w:color'),'auto')
         shd.set(qn('w:fill'), hex_color)
         tcPr.append(shd)
 
-    def set_brd(cell):
-        tcPr = cell._tc.get_or_add_tcPr()
+    def set_brd(wc):
+        tcPr = wc._tc.get_or_add_tcPr()
         for old in tcPr.findall(qn('w:tcBorders')): tcPr.remove(old)
         brd = OxmlElement('w:tcBorders')
         for side in ('top','left','bottom','right'):
@@ -3539,19 +2502,27 @@ def build_generic_transposed_word(xl_file_bytes, table_num, title_suffix,
             brd.append(b)
         tcPr.append(brd)
 
-    def set_row_height(tr, h_twips):
+    def set_row_h(tr, h):
         trPr = tr.find(qn('w:trPr'))
         if trPr is None:
-            trPr = OxmlElement('w:trPr'); tr.insert(0, trPr)
+            trPr = OxmlElement('w:trPr'); tr.insert(0,trPr)
         for old in trPr.findall(qn('w:trHeight')): trPr.remove(old)
         trH = OxmlElement('w:trHeight')
-        trH.set(qn('w:val'), str(h_twips)); trH.set(qn('w:hRule'), 'exact')
+        trH.set(qn('w:val'), str(h)); trH.set(qn('w:hRule'),'exact')
         trPr.append(trH)
 
-    def write_cell(wrd_cell, text, bold=False, bg=WHITE, is_hdr=False):
-        wrd_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        set_bg(wrd_cell, bg); set_brd(wrd_cell)
-        p = wrd_cell.paragraphs[0]; p.clear()
+    def set_vm(wc, restart=False):
+        tc = wc._tc; tcPr = tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:vMerge')): tcPr.remove(old)
+        vm = OxmlElement('w:vMerge')
+        if restart: vm.set(qn('w:val'),'restart')
+        tcPr.append(vm)
+
+    def write_cell(wc, text, bold=False, bg=WHITE, sz=16):
+        """sz in half-points: 16=8pt, 18=9pt"""
+        wc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        set_bg(wc, bg); set_brd(wc)
+        p = wc.paragraphs[0]; p.clear()
         p.paragraph_format.space_before = Pt(0)
         p.paragraph_format.space_after  = Pt(0)
         pPr = p._p.get_or_add_pPr()
@@ -3561,7 +2532,8 @@ def build_generic_transposed_word(xl_file_bytes, table_num, title_suffix,
         lines = str(text).split('\n')
         use_heb = has_heb(text)
         fname   = 'David' if use_heb else 'Times New Roman'
-        fsize   = '18' if is_hdr else '16'   # 9pt hdr / 8pt data (half-points)
+        # כתב לבן על כהה
+        text_color = 'FFFFFF' if hdr_color.upper() in ('0070C0','2E75B6','4472C4') and bg == HDR_BG else None
 
         def _run(txt):
             r = _lxml.SubElement(p._p, _w('r'))
@@ -3569,77 +2541,78 @@ def build_generic_transposed_word(xl_file_bytes, table_num, title_suffix,
             rF = _lxml.SubElement(rPr, _w('rFonts'))
             for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a), fname)
             if bold:
-                b  = _lxml.SubElement(rPr, _w('b'));  b.set(_w('val'),'1')
-                bC = _lxml.SubElement(rPr, _w('bCs')); bC.set(_w('val'),'1')
-            sz  = _lxml.SubElement(rPr, _w('sz'));   sz.set(_w('val'), fsize)
-            szC = _lxml.SubElement(rPr, _w('szCs')); szC.set(_w('val'), fsize)
+                _lxml.SubElement(rPr, _w('b')).set(_w('val'),'1')
+                _lxml.SubElement(rPr, _w('bCs')).set(_w('val'),'1')
+            if text_color:
+                _lxml.SubElement(rPr, _w('color')).set(_w('val'), text_color)
+            _lxml.SubElement(rPr, _w('sz')).set(_w('val'), str(sz))
+            _lxml.SubElement(rPr, _w('szCs')).set(_w('val'), str(sz))
             _lxml.SubElement(rPr, _w('rtl'))
             t = _lxml.SubElement(r, _w('t'))
-            t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+            t.set('{http://www.w3.org/XML/1998/namespace}space','preserve')
             t.text = txt
 
         def _br():
-            br_r = _lxml.SubElement(p._p, _w('r'))
-            _lxml.SubElement(br_r, _w('br'))
+            _lxml.SubElement(_lxml.SubElement(p._p, _w('r')), _w('br'))
 
         for i, line in enumerate(lines):
             if i > 0: _br()
             _run(line)
 
-    # ── חישוב רוחב עמודות ────────────────────────────────────────────────────
-    # info cols רחבות יותר, drill cols צרות
-    info_w  = int(content_w * 0.04)   # ~4% per info col
-    drill_w = max(int((content_w - info_w * n_info_cols) / max(1, n_cols - n_info_cols)), 1)
-    # col widths array
-    col_ws = [info_w if ci < n_info_cols else drill_w for ci in range(n_cols)]
+    # ── רוחב עמודות ────────────────────────────────────────────────────────────
+    # info cols (0..n_info_cols-1): רחבות יותר
+    # drill cols: שאר
+    n_drill_cols = n_cols - n_info_cols
+    # חלוקה: info = 35% מסך, drill = 65%
+    info_total  = int(content_w * 0.38)
+    drill_total = content_w - info_total
+    info_w  = info_total // n_info_cols if n_info_cols > 0 else 0
+    drill_w = max(int(drill_total // max(1, n_drill_cols)), 1)
 
-    # ── חלוקה לדפים לפי עמודות ───────────────────────────────────────────────
-    # כמה עמודות drill נכנסות בדף אחד?
-    usable = content_w - info_w * n_info_cols
-    drills_pp = max(5, usable // max(1, drill_w))
-    drill_cols = list(range(n_info_cols, n_cols))  # 0-indexed
+    col_ws_all = [info_w]*n_info_cols + [drill_w]*n_drill_cols
+
+    # ── חלוקה לדפים ────────────────────────────────────────────────────────────
+    drills_pp = max(5, (content_w - info_total) // max(1, drill_w))
+    drill_col_idxs = list(range(n_info_cols, n_cols))
     pages = []
     i = 0
-    while i < len(drill_cols):
-        pages.append(drill_cols[i:i+drills_pp])
+    while i < len(drill_col_idxs):
+        pages.append(drill_col_idxs[i:i+drills_pp])
         i += drills_pp
     if not pages: pages = [[]]
     total_parts = len(pages)
 
-    # ── בנה מסמך ─────────────────────────────────────────────────────────────
+    # ── בנה Document ───────────────────────────────────────────────────────────
     doc = Document()
-    styles = doc.element.find('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styles')
+    _WD = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+    styles = doc.element.find(f'{{{_WD}}}styles')
     if styles is not None:
-        _WD = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
-        for b_off in styles.findall(f'.//{{{_WD}}}b[@{{{_WD}}}val="0"]'):
-            b_off.getparent().remove(b_off)
+        for b in styles.findall(f'.//{{{_WD}}}b[@{{{_WD}}}val="0"]'):
+            b.getparent().remove(b)
+        for b in styles.findall(f'.//{{{_WD}}}bCs[@{{{_WD}}}val="0"]'):
+            b.getparent().remove(b)
     for p in doc.paragraphs:
         p._element.getparent().remove(p._element)
 
-    def _title_segments(txt):
-        parts = re.split(r'([A-Za-z]+)', txt)
-        return [(p, bool(re.match(r'^[A-Za-z]+$', p))) for p in parts if p]
-
-    def _add_title_run(parent_p, text, is_eng):
+    def _title_run(parent_p, text, is_eng):
         fname = 'Times New Roman' if is_eng else 'David'
-        fsize = '22' if is_eng else '26'
-        r_el   = _lxml.SubElement(parent_p, _w('r'))
-        rPr_el = _lxml.SubElement(r_el,    _w('rPr'))
-        rF = _lxml.SubElement(rPr_el, _w('rFonts'))
+        r = _lxml.SubElement(parent_p, _w('r'))
+        rPr = _lxml.SubElement(r, _w('rPr'))
+        rF = _lxml.SubElement(rPr, _w('rFonts'))
         for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a), fname)
-        b  = _lxml.SubElement(rPr_el, _w('b'));  b.set(_w('val'),'1')
-        bC = _lxml.SubElement(rPr_el, _w('bCs')); bC.set(_w('val'),'1')
-        u  = _lxml.SubElement(rPr_el, _w('u'));  u.set(_w('val'),'single')
-        sz  = _lxml.SubElement(rPr_el, _w('sz'));  sz.set(_w('val'), fsize)
-        szC = _lxml.SubElement(rPr_el, _w('szCs')); szC.set(_w('val'), fsize)
-        _lxml.SubElement(rPr_el, _w('rtl'))
-        t_el = _lxml.SubElement(r_el, _w('t'))
-        t_el.set('{http://www.w3.org/XML/1998/namespace}space','preserve')
-        t_el.text = text
+        _lxml.SubElement(rPr, _w('b')).set(_w('val'),'1')
+        _lxml.SubElement(rPr, _w('bCs')).set(_w('val'),'1')
+        _lxml.SubElement(rPr, _w('u')).set(_w('val'),'single')
+        _lxml.SubElement(rPr, _w('sz')).set(_w('val'), '22' if is_eng else '26')
+        _lxml.SubElement(rPr, _w('szCs')).set(_w('val'), '22' if is_eng else '26')
+        _lxml.SubElement(rPr, _w('rtl'))
+        t = _lxml.SubElement(r, _w('t'))
+        t.set('{http://www.w3.org/XML/1998/namespace}space','preserve')
+        t.text = text
 
-    for part_idx, page_drill_cols in enumerate(pages):
-        pn    = part_idx + 1
-        pts   = f"(חלק {pn} מתוך {total_parts})" if total_parts > 1 else ""
+    for part_idx, page_drills in enumerate(pages):
+        pn  = part_idx + 1
+        pts = f"(חלק {pn} מתוך {total_parts})" if total_parts > 1 else ""
         title = f"טבלה מספר {table_num} {pts} – {title_suffix}".strip()
 
         section = doc.sections[0] if part_idx == 0 else doc.add_section()
@@ -3650,167 +2623,155 @@ def build_generic_transposed_word(xl_file_bytes, table_num, title_suffix,
         tp.paragraph_format.space_before = Pt(0)
         tp.paragraph_format.space_after  = Pt(0)
         tp.paragraph_format.keep_with_next = True
-        pPr_t = tp._p.get_or_add_pPr()
-        _lxml.SubElement(pPr_t, _w('bidi'))
-        jc_el = _lxml.SubElement(pPr_t, _w('jc')); jc_el.set(_w('val'),'center')
-        for seg, is_eng in _title_segments(title):
-            _add_title_run(tp._p, seg, is_eng)
+        pPr = tp._p.get_or_add_pPr()
+        _lxml.SubElement(pPr, _w('bidi'))
+        _lxml.SubElement(pPr, _w('jc')).set(_w('val'),'center')
+        for seg, is_eng in [(p, bool(re.match(r'^[A-Za-z]+$',p)))
+                            for p in re.split(r'([A-Za-z]+)', title) if p]:
+            _title_run(tp._p, seg, is_eng)
 
-        # רווח
-        sp_p = doc.add_paragraph()
-        sp_p.paragraph_format.space_before = Pt(0)
-        sp_p.paragraph_format.space_after  = Pt(0)
-        sp_p.paragraph_format.line_spacing = Pt(19.5)
-        sp_p.paragraph_format.keep_with_next = True
+        # רווח 1.5 שורות
+        sp = doc.add_paragraph()
+        sp.paragraph_format.space_before = Pt(0)
+        sp.paragraph_format.space_after  = Pt(0)
+        sp.paragraph_format.line_spacing = Pt(19.5)
+        sp.paragraph_format.keep_with_next = True
 
-        # עמודות בדף זה: info cols + drill cols
-        page_col_indices = list(range(n_info_cols)) + page_drill_cols  # 0-indexed
-        n_page_cols = len(page_col_indices)
+        # עמודות בדף זה
+        page_col_idxs = list(range(n_info_cols)) + page_drills  # 0-indexed
+        n_page_cols = len(page_col_idxs)
 
         # טבלה
         table = doc.add_table(rows=n_rows, cols=n_page_cols)
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         table.style = 'Table Grid'
-
-        # bidiVisual
         tblPr = table._tbl.find(qn('w:tblPr'))
         if tblPr is None:
-            tblPr = OxmlElement('w:tblPr'); table._tbl.insert(0, tblPr)
+            tblPr = OxmlElement('w:tblPr'); table._tbl.insert(0,tblPr)
         _lxml.SubElement(tblPr, _w('bidiVisual'))
 
         # רוחב עמודות
-        for new_ci, orig_ci in enumerate(page_col_indices):
-            w = col_ws[orig_ci]
-            for wrd_cell in table.columns[new_ci].cells:
-                wrd_cell.width = Emu(w)
+        for new_ci, orig_ci in enumerate(page_col_idxs):
+            w = col_ws_all[orig_ci]
+            for wc in table.columns[new_ci].cells:
+                wc.width = Emu(w)
 
         # גובה שורות
-        HDR_H  = 360
-        ROW_H  = 280
         for ri in range(n_rows):
-            set_row_height(table.rows[ri]._tr, HDR_H if ri < n_hdr_rows else ROW_H)
+            set_row_h(table.rows[ri]._tr, 360 if ri < n_hdr_rows else 280)
 
-        # ── מלא תאים ─────────────────────────────────────────────────────────
+        # ── מלא טבלה ──────────────────────────────────────────────────────────
         has_yel = False; has_org = False
 
-        for new_ri, orig_ri_0 in enumerate(range(n_rows)):
-            orig_ri = orig_ri_0 + 1  # 1-indexed for openpyxl
+        # בנה מפת תאים שכבר טופלו (hMerge) כדי לא לכתוב פעמיים
+        hmerge_done = set()
 
-            for new_ci, orig_ci_0 in enumerate(page_col_indices):
+        for new_ri in range(n_rows):
+            orig_ri = new_ri + 1  # 1-indexed openpyxl
+
+            for new_ci, orig_ci_0 in enumerate(page_col_idxs):
                 orig_ci = orig_ci_0 + 1  # 1-indexed
 
-                # דלג על תאים שהם חלק ממיזוג (לא ה-master)
+                if (new_ri, new_ci) in hmerge_done:
+                    continue
+
+                # skip non-master merge cells (מקורי)
                 if (orig_ri, orig_ci) in skip_set:
                     continue
 
-                xl_cell = ws.cell(orig_ri, orig_ci)
-                val = xl_cell.value
+                xl_c = ws.cell(orig_ri, orig_ci)
+                val  = xl_c.value
                 val_s = str(val).strip() if val is not None else ''
 
                 # צבע רקע
-                bg = get_cell_bg(xl_cell)
-                is_hdr = orig_ri <= n_hdr_rows
-                if bg is None:
-                    bg = HDR_BG if is_hdr else WHITE
-                if bg == YELLOW: has_yel = True
-                if bg == ORANGE: has_org = True
+                xl_fill = xl_bg(xl_c)
+                is_hdr  = orig_ri <= n_hdr_rows
+                is_grp  = not is_hdr and is_grp_color(xl_fill)
+
+                if is_hdr:
+                    bg = HDR_BG
+                elif xl_fill == YELLOW:
+                    bg = YELLOW; has_yel = True
+                elif xl_fill == ORANGE:
+                    bg = ORANGE; has_org = True
+                elif is_grp:
+                    bg = GRP_BG
+                else:
+                    bg = WHITE
+
                 is_exceed = bg in (YELLOW, ORANGE)
+                bold = is_hdr or is_grp or is_exceed
 
-                wrd_cell = table.cell(new_ri, new_ci)
-                write_cell(wrd_cell, val_s, bold=(is_hdr or is_exceed), bg=bg, is_hdr=is_hdr)
+                wc = table.cell(new_ri, new_ci)
+                write_cell(wc, val_s, bold=bold, bg=bg, sz=18 if is_hdr else 16)
 
-                # ── מיזוג אופקי (hMerge) ─────────────────────────────────────
-                merge_info = merge_map.get((orig_ri, orig_ci))
-                if merge_info:
-                    mr1, mc1, mr2, mc2 = merge_info
-                    # רוחב אופקי בדף הנוכחי
-                    merge_cols_in_page = [
-                        new_ci2 for new_ci2, oc in enumerate(page_col_indices)
-                        if mc1 <= oc+1 <= mc2+1  # approximate - use range
-                    ]
-                    # חישוב מדויק
-                    end_new_ci = new_ci
-                    for mc in range(mc1, mc2+1):
-                        if mc-1 in page_col_indices:
-                            candidate = page_col_indices.index(mc-1)
-                            if candidate > end_new_ci:
-                                end_new_ci = candidate
+                # ── vMerge: info cols בשורות header ────────────────────────────
+                # cols 0..n_info_cols-1, rows 0..n_hdr_rows-1: vMerge restart בשורה 0
+                if orig_ci_0 < n_info_cols and orig_ri <= n_hdr_rows:
+                    set_vm(wc, restart=(orig_ri == 1))
 
-                    # מיזוג אנכי (vMerge)
-                    if mr2 > mr1:
-                        tc = wrd_cell._tc
-                        tcPr = tc.get_or_add_tcPr()
-                        vm = OxmlElement('w:vMerge')
-                        vm.set(qn('w:val'), 'restart')
-                        tcPr.append(vm)
-
-                    # הרץ שורות vMerge continue
-                    for sub_ri in range(mr1+1, mr2+1):
-                        new_sub_ri = sub_ri - 1  # 0-indexed
-                        if new_sub_ri < n_rows:
-                            try:
-                                sub_cell = table.cell(new_sub_ri, new_ci)
-                                tc2 = sub_cell._tc
-                                tcPr2 = tc2.get_or_add_tcPr()
-                                vm2 = OxmlElement('w:vMerge')
-                                tcPr2.append(vm2)
-                                # צבע לתא ממוזג
-                                set_bg(sub_cell, bg)
-                                set_brd(sub_cell)
-                            except: pass
-
-                    # מיזוג אופקי
-                    if mc2 > mc1 and end_new_ci > new_ci:
+                # ── hMerge (gridSpan) לשמות קידוחים ────────────────────────────
+                mi = master_map.get((orig_ri, orig_ci))
+                if mi:
+                    mr1, mc1, mr2, mc2 = mi
+                    # מצא כמה עמודות בדף מכוסות ע"י המיזוג
+                    covered = []
+                    for span_c in range(mc1, mc2+1):
+                        span_c_0 = span_c - 1  # 0-indexed
+                        if span_c_0 in page_col_idxs:
+                            covered.append(page_col_idxs.index(span_c_0))
+                    if len(covered) > 1:
+                        end_new_ci = max(covered)
                         try:
-                            end_cell = table.cell(new_ri, end_new_ci)
-                            wrd_cell.merge(end_cell)
+                            end_wc = table.cell(new_ri, end_new_ci)
+                            wc.merge(end_wc)
+                            for mc in range(new_ci, end_new_ci+1):
+                                hmerge_done.add((new_ri, mc))
                         except: pass
 
-        # ── מקרא ─────────────────────────────────────────────────────────────
+        # ── מקרא ──────────────────────────────────────────────────────────────
         lp = doc.add_paragraph()
         lp.paragraph_format.space_before = Pt(4)
         lp.paragraph_format.space_after  = Pt(0)
         lp_pPr = lp._p.get_or_add_pPr()
-        for old_jc in lp_pPr.findall(_w('jc')): lp_pPr.remove(old_jc)
-        for old_bi in lp_pPr.findall(_w('bidi')): lp_pPr.remove(old_bi)
-        jc_lp = _lxml.SubElement(lp_pPr, _w('jc')); jc_lp.set(_w('val'),'right')
+        for old in lp_pPr.findall(_w('jc')): lp_pPr.remove(old)
+        for old in lp_pPr.findall(_w('bidi')): lp_pPr.remove(old)
+        _lxml.SubElement(lp_pPr, _w('jc')).set(_w('val'),'right')
 
-        def leg_word_run(para, word, hex_color):
-            r_el   = _lxml.SubElement(para._p, _w('r'))
-            rPr_el = _lxml.SubElement(r_el,    _w('rPr'))
-            rF = _lxml.SubElement(rPr_el, _w('rFonts'))
-            for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a), 'David')
-            b  = _lxml.SubElement(rPr_el, _w('b'));  b.set(_w('val'),'1')
-            bC = _lxml.SubElement(rPr_el, _w('bCs')); bC.set(_w('val'),'1')
-            sz  = _lxml.SubElement(rPr_el, _w('sz'));  sz.set(_w('val'),'18')
-            szC = _lxml.SubElement(rPr_el, _w('szCs')); szC.set(_w('val'),'18')
-            shd = _lxml.SubElement(rPr_el, _w('shd'))
-            shd.set(_w('val'),'clear'); shd.set(_w('color'),'auto'); shd.set(_w('fill'), hex_color)
-            _lxml.SubElement(rPr_el, _w('rtl'))
-            t = _lxml.SubElement(r_el, _w('t'))
+        def _leg_colored(word, color):
+            r = _lxml.SubElement(lp._p, _w('r'))
+            rPr = _lxml.SubElement(r, _w('rPr'))
+            rF = _lxml.SubElement(rPr, _w('rFonts'))
+            for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a),'David')
+            _lxml.SubElement(rPr, _w('b')).set(_w('val'),'1')
+            _lxml.SubElement(rPr, _w('bCs')).set(_w('val'),'1')
+            _lxml.SubElement(rPr, _w('sz')).set(_w('val'),'18')
+            _lxml.SubElement(rPr, _w('szCs')).set(_w('val'),'18')
+            shd = _lxml.SubElement(rPr, _w('shd'))
+            shd.set(_w('val'),'clear'); shd.set(_w('color'),'auto'); shd.set(_w('fill'),color)
+            _lxml.SubElement(rPr, _w('rtl'))
+            t = _lxml.SubElement(r, _w('t'))
             t.set('{http://www.w3.org/XML/1998/namespace}space','preserve')
             t.text = word
 
-        def leg_plain_run(para, text):
-            r_el   = _lxml.SubElement(para._p, _w('r'))
-            rPr_el = _lxml.SubElement(r_el,    _w('rPr'))
-            rF = _lxml.SubElement(rPr_el, _w('rFonts'))
-            for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a), 'David')
-            sz  = _lxml.SubElement(rPr_el, _w('sz'));  sz.set(_w('val'),'18')
-            szC = _lxml.SubElement(rPr_el, _w('szCs')); szC.set(_w('val'),'18')
-            _lxml.SubElement(rPr_el, _w('rtl'))
-            t = _lxml.SubElement(r_el, _w('t'))
+        def _leg_plain(text):
+            r = _lxml.SubElement(lp._p, _w('r'))
+            rPr = _lxml.SubElement(r, _w('rPr'))
+            rF = _lxml.SubElement(rPr, _w('rFonts'))
+            for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a),'David')
+            _lxml.SubElement(rPr, _w('sz')).set(_w('val'),'18')
+            _lxml.SubElement(rPr, _w('szCs')).set(_w('val'),'18')
+            _lxml.SubElement(rPr, _w('rtl'))
+            t = _lxml.SubElement(r, _w('t'))
             t.set('{http://www.w3.org/XML/1998/namespace}space','preserve')
             t.text = text
 
         if has_yel:
-            leg_word_run(lp, "בצהוב", "FFFF00")
-            leg_plain_run(lp, " - חריגה מערך הסף VSL")
+            _leg_colored("בצהוב", "FFFF00"); _leg_plain(" - חריגה מערך הסף VSL")
         if has_yel and has_org:
-            leg_plain_run(lp, "     ")
+            _leg_plain("     ")
         if has_org:
-            leg_word_run(lp, "בכתום", "FFC000")
-            leg_plain_run(lp, " - חריגה מערך הסף TIER 1")
+            _leg_colored("בכתום", "FFC000"); _leg_plain(" - חריגה מערך הסף TIER 1")
 
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     return buf.getvalue()
@@ -3821,6 +2782,7 @@ def build_voc_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
         xl_file_bytes, table_num,
         title_suffix="תוצאות אנליזות VOC ו-SVOC",
         n_info_cols=7, n_hdr_rows=2,
+        hdr_color="8DB4E2", group_color="DCE6F1",
         page_size=page_size, landscape=landscape
     )
 
@@ -3830,6 +2792,6 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
         xl_file_bytes, table_num,
         title_suffix="תוצאות אנליזות PFAS",
         n_info_cols=5, n_hdr_rows=2,
+        hdr_color="0070C0", group_color="FFFFFF",
         page_size=page_size, landscape=landscape
     )
-
