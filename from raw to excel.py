@@ -1768,10 +1768,39 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         section = doc.sections[0] if part_idx == 0 else doc.add_section()
         set_page(section)
 
-        # כותרת - ממורכזת, מודגשת, עם קו תחתון
-        tp = make_rtl_para(doc, 'center')
+        # כותרת - ממורכזת, מודגשת, קו תחתון (XML ידני לאמינות מלאה)
+        tp = doc.add_paragraph()
+        tp.paragraph_format.space_before = Pt(0)
+        tp.paragraph_format.space_after  = Pt(0)
         tp.paragraph_format.keep_with_next = True
-        add_rtl_run(tp, title, bold=True, underline=True, size_heb=13, size_eng=11)
+        pPr_t = tp._p.get_or_add_pPr()
+        pPr_t.append(OxmlElement('w:bidi'))
+        jc_t = OxmlElement('w:jc'); jc_t.set(qn('w:val'), 'center'); pPr_t.append(jc_t)
+        # בנה run עם כל המאפיינים ידנית
+        from lxml import etree as _et
+        NS_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+        r_el = _et.SubElement(tp._p, f'{{{NS_W}}}r')
+        rPr_el = _et.SubElement(r_el, f'{{{NS_W}}}rPr')
+        # fonts
+        rF = _et.SubElement(rPr_el, f'{{{NS_W}}}rFonts')
+        for attr in ('ascii','hAnsi','cs','eastAsia'):
+            rF.set(f'{{{NS_W}}}{attr}', 'David')
+        # bold
+        _et.SubElement(rPr_el, f'{{{NS_W}}}b')
+        # underline
+        u_el = _et.SubElement(rPr_el, f'{{{NS_W}}}u')
+        u_el.set(f'{{{NS_W}}}val', 'single')
+        # size 13pt = 26 half-points
+        sz_el = _et.SubElement(rPr_el, f'{{{NS_W}}}sz')
+        sz_el.set(f'{{{NS_W}}}val', '26')
+        szCs_el = _et.SubElement(rPr_el, f'{{{NS_W}}}szCs')
+        szCs_el.set(f'{{{NS_W}}}val', '26')
+        # RTL
+        _et.SubElement(rPr_el, f'{{{NS_W}}}rtl')
+        # text
+        t_el = _et.SubElement(r_el, f'{{{NS_W}}}t')
+        t_el.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+        t_el.text = title
 
         # רווח קבוע 1.5 שורה בין כותרת לטבלה
         sp = doc.add_paragraph()
@@ -1824,33 +1853,31 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         lp.paragraph_format.space_before = Pt(4)
         lp.paragraph_format.space_after  = Pt(0)
 
-        def leg_highlight_run(para, word, bg_hex, rest_text):
-            """מילה עם הדגשת רקע + שאר הטקסט"""
-            # ■
-            add_rtl_run(para, "■ ", color_hex=bg_hex, size_heb=10, size_eng=10)
-            # מילה עם רקע צבעוני
+        def leg_run(para, word, hl_val, rest_text):
+            """■ שחור + מילה עם הדגשת רקע + שאר טקסט"""
+            # ■ בשחור - ללא צבע
+            add_rtl_run(para, "■ ", size_heb=10, size_eng=10)
+            # מילה מודגשת עם רקע צבעוני
             r = para.add_run(word)
             r.bold = True
             r.font.size = Pt(10)
             rPr = r._r.get_or_add_rPr()
             rFonts = OxmlElement('w:rFonts')
-            rFonts.set(qn('w:ascii'), 'David'); rFonts.set(qn('w:hAnsi'), 'David')
-            rFonts.set(qn('w:cs'), 'David'); rPr.insert(0, rFonts)
+            for attr, val in [('w:ascii','David'),('w:hAnsi','David'),('w:cs','David'),('w:eastAsia','David')]:
+                rFonts.set(qn(attr), val)
+            rPr.insert(0, rFonts)
             szCs = OxmlElement('w:szCs'); szCs.set(qn('w:val'), '20'); rPr.append(szCs)
             rPr.append(OxmlElement('w:rtl'))
-            # highlight background
-            hl = OxmlElement('w:highlight')
-            hl.set(qn('w:val'), 'yellow' if bg_hex == 'FFFF00' else 'orange')
-            rPr.append(hl)
-            # rest
+            hl = OxmlElement('w:highlight'); hl.set(qn('w:val'), hl_val); rPr.append(hl)
+            # שאר המשפט
             add_rtl_run(para, rest_text, size_heb=10, size_eng=10)
 
         if has_yel:
-            leg_highlight_run(lp, "בצהוב", "FFFF00", " - חריגה מערך הסף VSL")
+            leg_run(lp, "בצהוב", "yellow", " - חריגה מערך הסף VSL")
         if has_yel and has_org:
             add_rtl_run(lp, "     ", size_heb=10, size_eng=10)
         if has_org:
-            leg_highlight_run(lp, "בכתום", "FFC000", " - חריגה מערך הסף TIER 1")
+            leg_run(lp, "בכתום", "orange", " - חריגה מערך הסף TIER 1")
 
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     return buf.getvalue()
