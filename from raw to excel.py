@@ -1977,6 +1977,15 @@ def build_metals_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
     if not xl_rows:
         raise ValueError("הקובץ ריק")
 
+    # סנן עמודות ריקות לגמרי
+    n_raw = len(xl_rows[0])
+    non_empty_cols = []
+    for ci in range(n_raw):
+        if any(xl_rows[ri][ci].value not in (None, "", "-") for ri in range(len(xl_rows))):
+            non_empty_cols.append(ci)
+    # בנה מחדש xl_rows רק עם עמודות לא ריקות
+    xl_rows = [[row[ci] for ci in non_empty_cols] for row in xl_rows]
+
     n_cols = len(xl_rows[0])  # מספר עמודות כולל שם קידוח + עומק + מתכות
 
     def get_color(cell):
@@ -2238,8 +2247,21 @@ def build_metals_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
                 xl_c = xl_hdr_row[ci] if ci < len(xl_hdr_row) else None
                 val  = xl_c.value if xl_c else ""
                 val_s = str(val).strip() if val is not None else ""
+                # שורות 1-4 בעמודה 0: ריק (ימוזג)
+                if ci == 0 and hi > 0:
+                    val_s = ""
                 write_cell(table.cell(hi, ci), val_s, bold=True, bg=HDR_BG,
                            size_heb=9, size_eng=7)
+
+        # מזג שורות 0-4 בעמודה 0 (שם קידוח) - vMerge
+        for hi in range(N_HDR):
+            tc   = table.cell(hi, 0)._tc
+            tcPr = tc.get_or_add_tcPr()
+            for old in tcPr.findall(qn('w:vMerge')): tcPr.remove(old)
+            vm = OxmlElement('w:vMerge')
+            if hi == 0:
+                vm.set(qn('w:val'), 'restart')
+            tcPr.append(vm)
 
         # ── שורות נתונים ─────────────────────────────────────────────────────
         has_yel = False; has_org = False
