@@ -1471,267 +1471,294 @@ def build_word_report(table_configs, thresh_dict, t1col, t1lbl):
 tab_excel, tab_word = st.tabs(["📊 יצוא Excel", "📄 יצוא Word"])
 
 
-# ── BUILD WORD FROM EXCEL ─────────────────────────────────────────────────────
-def build_word_from_excel(table_configs):
+# ── TPH WORD EXPORT ──────────────────────────────────────────────────────────
+def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
     """
-    קורא טבלאות מקבצי Excel ומחלק לדפי Word.
-    כל config: {file, title, page_size, landscape}
-    שומר צבעי רקע מהאקסל (צהוב=VSL, כתום=TIER1)
+    בונה דוח Word ל-TPH מקובץ Excel מעובד.
+    מחלק לדפים, כותרת בכל דף, מיזוג שם קידוח, RTL, צבעים.
     """
     from openpyxl import load_workbook as lw
-    from openpyxl.styles import PatternFill
 
-    PAGE_SIZES_DXA = {
-        "A4":      (11906, 16838),
-        "Tabloid": (17280, 22320),
-    }
-    MARGIN = 540  # 0.375 inch
+    # ── קרא Excel ──────────────────────────────────────────────────────────────
+    wb = lw(io.BytesIO(xl_file_bytes), data_only=True)
+    ws = wb.active
 
-    def content_width(page_size, landscape):
-        w, h = PAGE_SIZES_DXA[page_size]
-        return (h if landscape else w) - 2 * MARGIN
+    # שורות הנתונים (אחרי 5 שורות כותרת)
+    N_HDR = 5
+    all_rows = list(ws.iter_rows(values_only=False))
+    if len(all_rows) <= N_HDR:
+        raise ValueError("הקובץ ריק או לא מכיל נתונים")
 
-    def set_page(section, page_size, landscape):
-        w, h = PAGE_SIZES_DXA[page_size]
+    hdr_rows  = all_rows[:N_HDR]
+    data_rows = all_rows[N_HDR:]
+
+    # קרא ערכי סף מהכותרת
+    def cell_val(r, c):
+        v = hdr_rows[r][c].value
+        return str(v).strip() if v is not None else ""
+
+    vsl_dro   = cell_val(3, 2)
+    vsl_oro   = cell_val(3, 3)
+    vsl_tot   = cell_val(3, 4)
+    tier1_dro = cell_val(4, 2)
+    tier1_oro = cell_val(4, 3)
+    tier1_tot = cell_val(4, 4)
+
+    # ── גדלי דף ────────────────────────────────────────────────────────────────
+    PAGE_DXA = {"A4":(11906,16838), "Tabloid":(17280,22320)}
+    MARGIN = 720  # 0.5 inch
+    pw, ph = PAGE_DXA[page_size]
+    if landscape:
+        page_w_dxa, page_h_dxa = ph, pw
+    else:
+        page_w_dxa, page_h_dxa = pw, ph
+    content_w = page_w_dxa - 2*MARGIN
+
+    # עמודות: שם קידוח | עומק | אנליזה | DRO | ORO | Total
+    # רוחבים יחסיים לפי הדוגמה
+    COL_NAMES = ["שם קידוח","עומק","אנליזה","TPH DRO","TPH ORO","Total TPH"]
+    N_COLS = 6
+    # proportional widths
+    ratios = [1480, 1060, 1060, 1680, 1680, 1680]
+    ratio_sum = sum(ratios)
+    col_ws = [int(content_w * r / ratio_sum) for r in ratios]
+    col_ws[-1] += content_w - sum(col_ws)  # fix rounding
+
+    # ── כמה שורות לדף ──────────────────────────────────────────────────────────
+    HDR_ROW_H = 380
+    DATA_ROW_H = 300
+    TITLE_H = 500
+    LEGEND_H = 400
+    avail = page_h_dxa - 2*MARGIN - TITLE_H - LEGEND_H - N_HDR*HDR_ROW_H
+    rows_per_page = max(8, int(avail / DATA_ROW_H))
+
+    # ── פצל לחלקים ─────────────────────────────────────────────────────────────
+    chunks = [data_rows[i:i+rows_per_page] for i in range(0, len(data_rows), rows_per_page)]
+    total_parts = len(chunks)
+
+    # ── צבעים ──────────────────────────────────────────────────────────────────
+    HDR_BLUE  = "B7D7F0"
+    HDR_CYAN  = "00B0F0"
+    WHITE     = "FFFFFF"
+    YELLOW    = "FFFF00"
+    ORANGE    = "FFC000"
+
+    def get_cell_color(xl_cell):
+        try:
+            fill = xl_cell.fill
+            if fill and fill.fill_type not in (None,"none",""):
+                fg = fill.fgColor
+                if fg.type == "rgb":
+                    rgb = fg.rgb[-6:].upper()
+                    if rgb not in ("000000","FFFFFF","000000"): return rgb
+        except: pass
+        return None
+
+    # ── הלפרים ─────────────────────────────────────────────────────────────────
+    def set_page_props(section):
         if landscape:
-            section.page_width  = Twips(h)
-            section.page_height = Twips(w)
+            section.page_width  = Twips(page_h_dxa)
+            section.page_height = Twips(page_w_dxa)
             section.orientation = WD_ORIENT.LANDSCAPE
         else:
-            section.page_width  = Twips(w)
-            section.page_height = Twips(h)
+            section.page_width  = Twips(page_w_dxa)
+            section.page_height = Twips(page_h_dxa)
             section.orientation = WD_ORIENT.PORTRAIT
         for attr in ('top_margin','bottom_margin','left_margin','right_margin'):
             setattr(section, attr, Twips(MARGIN))
 
-    def cell_color(xl_cell):
-        """מחזיר hex צבע רקע של תא Excel, או None"""
-        try:
-            fill = xl_cell.fill
-            if fill and fill.fill_type not in (None, "none"):
-                fg = fill.fgColor
-                if fg.type == "rgb" and fg.rgb not in ("00000000","FFFFFFFF","FF000000"):
-                    return fg.rgb[-6:]  # strip alpha
-        except:
-            pass
-        return None
-
-    def set_cell_bg(cell, hex_color):
-        tc = cell._tc
-        tcPr = tc.get_or_add_tcPr()
-        for old in tcPr.findall(qn('w:shd')):
-            tcPr.remove(old)
-        shd = OxmlElement('w:shd')
-        shd.set(qn('w:val'), 'clear')
-        shd.set(qn('w:color'), 'auto')
-        shd.set(qn('w:fill'), hex_color)
-        tcPr.append(shd)
-
-    def set_borders(cell):
-        tc = cell._tc
-        tcPr = tc.get_or_add_tcPr()
-        for old in tcPr.findall(qn('w:tcBorders')):
-            tcPr.remove(old)
-        tcB = OxmlElement('w:tcBorders')
-        for side in ('top','left','bottom','right'):
-            el = OxmlElement(f'w:{side}')
-            el.set(qn('w:val'), 'single')
-            el.set(qn('w:sz'), '4')
-            el.set(qn('w:space'), '0')
-            el.set(qn('w:color'), '000000')
-            tcB.append(el)
-        tcPr.append(tcB)
-
-    def set_col_w(cell, w_twips):
-        tc = cell._tc
-        tcPr = tc.get_or_add_tcPr()
-        for old in tcPr.findall(qn('w:tcW')):
-            tcPr.remove(old)
-        tcW = OxmlElement('w:tcW')
-        tcW.set(qn('w:w'), str(w_twips))
-        tcW.set(qn('w:type'), 'dxa')
-        tcPr.append(tcW)
-
-    def set_tbl_w(table, w_twips):
+    def set_tbl_w(table):
         tbl = table._tbl
         tblPr = tbl.find(qn('w:tblPr'))
         if tblPr is None:
-            tblPr = OxmlElement('w:tblPr')
-            tbl.insert(0, tblPr)
-        for old in tblPr.findall(qn('w:tblW')):
-            tblPr.remove(old)
+            tblPr = OxmlElement('w:tblPr'); tbl.insert(0, tblPr)
+        for old in tblPr.findall(qn('w:tblW')): tblPr.remove(old)
         tblW = OxmlElement('w:tblW')
-        tblW.set(qn('w:w'), str(w_twips))
-        tblW.set(qn('w:type'), 'dxa')
+        tblW.set(qn('w:w'), str(content_w)); tblW.set(qn('w:type'), 'dxa')
         tblPr.append(tblW)
+        # RTL table
+        for old in tblPr.findall(qn('w:bidiVisual')): tblPr.remove(old)
+        bv = OxmlElement('w:bidiVisual'); tblPr.append(bv)
 
-    def write_cell(cell, value, bg_hex=None, bold=False, size=8, is_header=False):
+    def set_col_w(cell, w):
+        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:tcW')): tcPr.remove(old)
+        tcW = OxmlElement('w:tcW')
+        tcW.set(qn('w:w'), str(w)); tcW.set(qn('w:type'), 'dxa')
+        tcPr.append(tcW)
+
+    def set_bg(cell, hex_color):
+        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:shd')): tcPr.remove(old)
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:val'),'clear'); shd.set(qn('w:color'),'auto')
+        shd.set(qn('w:fill'), hex_color); tcPr.append(shd)
+
+    def set_borders(cell):
+        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:tcBorders')): tcPr.remove(old)
+        tcB = OxmlElement('w:tcBorders')
+        for side in ('top','left','bottom','right'):
+            el = OxmlElement(f'w:{side}')
+            el.set(qn('w:val'),'single'); el.set(qn('w:sz'),'4')
+            el.set(qn('w:space'),'0'); el.set(qn('w:color'),'000000')
+            tcB.append(el)
+        tcPr.append(tcB)
+
+    def set_vmerge(cell, restart=False):
+        tc = cell._tc; tcPr = tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:vMerge')): tcPr.remove(old)
+        vm = OxmlElement('w:vMerge')
+        if restart: vm.set(qn('w:val'), 'restart')
+        tcPr.append(vm)
+
+    def write_cell(cell, text, bold=False, size=9, bg=WHITE, align="center", rtl=True):
         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        set_borders(cell)
-        if bg_hex:
-            set_cell_bg(cell, bg_hex)
-        elif is_header:
-            set_cell_bg(cell, "B7D7F0")
-        else:
-            set_cell_bg(cell, "FFFFFF")
-        p = cell.paragraphs[0]
-        p.clear()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.add_run(str(value) if value is not None else "")
-        run.bold = bold or is_header
-        run.font.name = "Arial"
-        run.font.size = Pt(size)
+        set_bg(cell, bg); set_borders(cell)
+        p = cell.paragraphs[0]; p.clear()
+        if align == "center": p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        elif align == "right": p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        else: p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        if rtl:
+            pPr = p._p.get_or_add_pPr()
+            bidi = OxmlElement('w:bidi'); pPr.append(bidi)
+        run = p.add_run(str(text) if text is not None else "")
+        run.bold = bold; run.font.name = "Arial"; run.font.size = Pt(size)
 
+    def add_hmerge(table, row_idx, col_start, col_end, text, bg, bold=True, size=9):
+        """ממזג תאים אופקית"""
+        cell = table.cell(row_idx, col_start)
+        cell.merge(table.cell(row_idx, col_end))
+        write_cell(cell, text, bold=bold, size=size, bg=bg)
+
+    # ── בנה Document ───────────────────────────────────────────────────────────
     doc = Document()
-    # remove default empty paragraph
     for p in doc.paragraphs:
         p._element.getparent().remove(p._element)
 
-    first_section = True
+    for part_idx, chunk in enumerate(chunks):
+        part_num = part_idx + 1
+        part_str = f"(חלק {part_num} מתוך {total_parts})" if total_parts > 1 else ""
+        title_text = f"טבלה מספר {table_num} {part_str} – תוצאות אנליזות TPH"
 
-    for cfg in table_configs:
-        file_obj  = cfg["file"]
-        title     = cfg["title"]
-        page_size = cfg.get("page_size", "A4")
-        landscape = cfg.get("landscape", False)
-
-        # Read Excel
-        wb = lw(io.BytesIO(file_obj.read()), data_only=True)
-        ws = wb.active
-
-        all_rows = list(ws.iter_rows())
-        if not all_rows:
-            continue
-
-        n_cols = ws.max_column
-        n_rows = ws.max_row
-
-        # Calc rows per page
-        PAGE_H = PAGE_SIZES_DXA[page_size][1] if not landscape else PAGE_SIZES_DXA[page_size][0]
-        avail_h = PAGE_H - 2*MARGIN
-        TITLE_H = 450
-        LEGEND_H = 350
-        HDR_H = 400   # header row height
-        ROW_H = 280   # data row height
-
-        # how many header rows? (look for merged cells / color pattern in first rows)
-        # Simple heuristic: count rows at top that have colored background
-        n_header_rows = 0
-        for row in all_rows[:5]:
-            has_color = any(cell_color(c) in ("B7D7F0","00B0F0","b7d7f0","00b0f0") or
-                           (c.font and c.font.bold) for c in row if c.value)
-            if has_color:
-                n_header_rows += 1
-            else:
-                break
-        if n_header_rows == 0:
-            n_header_rows = 1
-
-        data_rows_all = all_rows[n_header_rows:]
-        header_rows   = all_rows[:n_header_rows]
-
-        rows_per_page = max(5, int(
-            (avail_h - TITLE_H - LEGEND_H - n_header_rows * HDR_H) / ROW_H
-        ))
-
-        # Split data into chunks
-        chunks = [data_rows_all[i:i+rows_per_page] for i in range(0, len(data_rows_all), rows_per_page)]
-        if not chunks:
-            chunks = [[]]
-        total_parts = len(chunks)
-
-        cw = content_width(page_size, landscape)
-        # Column widths - distribute evenly, first col slightly wider
-        if n_cols <= 5:
-            w0 = int(cw * 0.22)
-            wr = int((cw - w0) / max(n_cols-1,1))
-            col_ws = [w0] + [wr]*(n_cols-1)
+        # Section
+        if part_idx == 0:
+            section = doc.sections[0]
         else:
-            w0 = int(cw * 0.16)
-            w1 = int(cw * 0.07)
-            wr = int((cw - w0 - w1) / max(n_cols-2,1))
-            col_ws = [w0, w1] + [wr]*(n_cols-2)
-        # Adjust last col
-        diff = cw - sum(col_ws)
-        if col_ws:
-            col_ws[-1] += diff
+            section = doc.add_section()
+        set_page_props(section)
 
-        for part_idx, chunk in enumerate(chunks):
-            part_num = part_idx + 1
-            part_str = f"  (חלק {part_num} מתוך {total_parts})" if total_parts > 1 else ""
+        # ── כותרת ──────────────────────────────────────────────────────────────
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        pPr = p._p.get_or_add_pPr()
+        bidi = OxmlElement('w:bidi'); pPr.append(bidi)
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after  = Pt(6)
+        run = p.add_run(title_text)
+        run.bold = True; run.underline = True
+        run.font.name = "Arial"; run.font.size = Pt(12)
 
-            # Section
-            if first_section:
-                section = doc.sections[0]
-                first_section = False
+        # ── בנה טבלה ───────────────────────────────────────────────────────────
+        n_data = len(chunk)
+        table = doc.add_table(rows=N_HDR + n_data, cols=N_COLS)
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        set_tbl_w(table)
+
+        # Set all column widths
+        for ri in range(N_HDR + n_data):
+            for ci in range(N_COLS):
+                set_col_w(table.cell(ri, ci), col_ws[ci])
+
+        # ── שורת כותרת 0: שמות עמודות ─────────────────────────────────────────
+        # שם קידוח (vmerge rows 0-4)
+        write_cell(table.cell(0,0), "שם קידוח", bold=True, bg=HDR_BLUE)
+        set_vmerge(table.cell(0,0), restart=True)
+        # עומק (vmerge rows 0-4 but col 1 only in header row 0)
+        write_cell(table.cell(0,1), "עומק", bold=True, bg=HDR_BLUE)
+        set_vmerge(table.cell(0,1), restart=True)
+        # אנליזה header - merge col2 row0 with nothing (standalone)
+        write_cell(table.cell(0,2), "אנליזה", bold=True, bg=HDR_CYAN)
+        # TPH DRO, ORO, Total - cyan header
+        for ci, lbl in enumerate(["TPH DRO","TPH ORO","Total TPH"], 3):
+            write_cell(table.cell(0,ci), lbl, bold=True, bg=HDR_CYAN)
+
+        # ── שורות כותרת 1-4 ────────────────────────────────────────────────────
+        hdr_labels = [
+            ("יחידות", ["mg/kg","mg/kg","mg/kg"]),
+            ("CAS",     ["C-10-C-40","C-10-C-40","C-10-C-40"]),
+            ("VSL",     [vsl_dro, vsl_oro, vsl_tot]),
+            ("TIER 1",  [tier1_dro, tier1_oro, tier1_tot]),
+        ]
+        for hi, (lbl, vals) in enumerate(hdr_labels, 1):
+            # שם קידוח - vmerge continue
+            write_cell(table.cell(hi,0), "", bg=HDR_BLUE)
+            set_vmerge(table.cell(hi,0))
+            # עומק+אנליזה - merge cols 1+2
+            c = table.cell(hi,1)
+            c.merge(table.cell(hi,2))
+            write_cell(c, lbl, bold=True, bg=HDR_BLUE)
+            # values
+            for ci, v in enumerate(vals, 3):
+                write_cell(table.cell(hi,ci), v, bold=True, bg=HDR_BLUE)
+
+        # ── שורות נתונים ───────────────────────────────────────────────────────
+        has_yellow = False; has_orange = False
+        # Group rows by drill ID for vmerge
+        prev_sid = None
+        for ri, xl_row in enumerate(chunk):
+            row_idx = N_HDR + ri
+            sid_val = xl_row[0].value
+            depth_val = xl_row[1].value
+
+            # שם קידוח - vmerge
+            if sid_val != prev_sid and sid_val is not None:
+                write_cell(table.cell(row_idx,0), str(sid_val), bold=True, bg=WHITE, align="center")
+                set_vmerge(table.cell(row_idx,0), restart=True)
+                prev_sid = sid_val
             else:
-                section = doc.add_section()
-            set_page(section, page_size, landscape)
+                write_cell(table.cell(row_idx,0), "", bg=WHITE)
+                set_vmerge(table.cell(row_idx,0))
 
-            # Title
-            p = doc.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            pPr = p._p.get_or_add_pPr()
-            bidi = OxmlElement('w:bidi')
-            pPr.append(bidi)
-            p.paragraph_format.space_before = Pt(0)
-            p.paragraph_format.space_after  = Pt(4)
-            run = p.add_run(f"{title}{part_str}")
-            run.bold = True
-            run.font.name = "Arial"
-            run.font.size = Pt(12)
+            # עומק + אנליזה - merge cols 1+2
+            c = table.cell(row_idx,1)
+            c.merge(table.cell(row_idx,2))
+            write_cell(c, str(depth_val) if depth_val is not None else "", bg=WHITE)
 
-            # Table
-            n_data = len(chunk)
-            table = doc.add_table(rows=n_header_rows + n_data, cols=n_cols)
-            table.alignment = WD_TABLE_ALIGNMENT.CENTER
-            set_tbl_w(table, cw)
+            # ערכים DRO, ORO, Total
+            for ci in range(3, 6):
+                xl_cell = xl_row[ci] if ci < len(xl_row) else None
+                val = xl_cell.value if xl_cell else ""
+                bg = get_cell_color(xl_cell) if xl_cell else None
+                if bg is None: bg = WHITE
+                if bg.upper() == YELLOW: has_yellow = True
+                if bg.upper() == ORANGE: has_orange = True
+                write_cell(table.cell(row_idx,ci), str(val) if val is not None else "", bg=bg)
 
-            # Header rows
-            for hi, hrow in enumerate(header_rows):
-                for ci, xl_cell in enumerate(hrow[:n_cols]):
-                    cell = table.cell(hi, ci)
-                    set_col_w(cell, col_ws[ci])
-                    bg = cell_color(xl_cell)
-                    write_cell(cell, xl_cell.value, bg_hex=bg, is_header=(bg is None), size=8)
+        # ── מקרא ───────────────────────────────────────────────────────────────
+        if has_yellow or has_orange:
+            lp = doc.add_paragraph()
+            lp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            pPr2 = lp._p.get_or_add_pPr()
+            bidi2 = OxmlElement('w:bidi'); pPr2.append(bidi2)
+            lp.paragraph_format.space_before = Pt(4)
+            lp.paragraph_format.space_after  = Pt(0)
+            if has_yellow:
+                r1 = lp.add_run("■ "); r1.font.name="Arial"; r1.font.size=Pt(9)
+                r1.font.color.rgb = RGBColor.from_string("FFFF00")
+                r2 = lp.add_run("בצהוב"); r2.bold=True; r2.font.name="Arial"; r2.font.size=Pt(9)
+                r2.font.color.rgb = RGBColor.from_string("CCCC00")
+                r3 = lp.add_run(" - חריגה מערך הסף VSL    ")
+                r3.font.name="Arial"; r3.font.size=Pt(9)
+            if has_orange:
+                r4 = lp.add_run("■ "); r4.font.name="Arial"; r4.font.size=Pt(9)
+                r4.font.color.rgb = RGBColor.from_string("FFC000")
+                r5 = lp.add_run("בכתום"); r5.bold=True; r5.font.name="Arial"; r5.font.size=Pt(9)
+                r5.font.color.rgb = RGBColor.from_string("CC8000")
+                r6 = lp.add_run(" - חריגה מערך הסף TIER 1")
+                r6.font.name="Arial"; r6.font.size=Pt(9)
 
-            # Data rows
-            has_yellow = False
-            has_orange = False
-            for ri, xl_row in enumerate(chunk):
-                for ci, xl_cell in enumerate(xl_row[:n_cols]):
-                    cell = table.cell(n_header_rows + ri, ci)
-                    set_col_w(cell, col_ws[ci])
-                    bg = cell_color(xl_cell)
-                    if bg and bg.upper() in ("FFFF00","FFC000"):
-                        if bg.upper() == "FFFF00": has_yellow = True
-                        if bg.upper() == "FFC000": has_orange = True
-                    write_cell(cell, xl_cell.value, bg_hex=bg, size=8)
-
-            # Legend
-            if has_yellow or has_orange:
-                lp = doc.add_paragraph()
-                lp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                pPr2 = lp._p.get_or_add_pPr()
-                bidi2 = OxmlElement('w:bidi')
-                pPr2.append(bidi2)
-                lp.paragraph_format.space_before = Pt(3)
-                if has_yellow:
-                    r1 = lp.add_run("■ ")
-                    r1.font.name = "Arial"; r1.font.size = Pt(8)
-                    r1.font.color.rgb = RGBColor.from_string("FFFF00")
-                    r2 = lp.add_run("בצהוב - חריגה מערך הסף VSL    ")
-                    r2.font.name = "Arial"; r2.font.size = Pt(8)
-                if has_orange:
-                    r3 = lp.add_run("■ ")
-                    r3.font.name = "Arial"; r3.font.size = Pt(8)
-                    r3.font.color.rgb = RGBColor.from_string("FFC000")
-                    r4 = lp.add_run("בכתום - חריגה מערך הסף TIER 1")
-                    r4.font.name = "Arial"; r4.font.size = Pt(8)
-
-    buf = io.BytesIO()
-    doc.save(buf)
-    buf.seek(0)
+    buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     return buf.getvalue()
 
 with tab_excel:
@@ -1876,3 +1903,36 @@ with tab_word:
                 import traceback; st.code(traceback.format_exc())
     else:
         st.info("👆 העלה לפחות קובץ Excel אחד למעלה")
+
+with tab_word:
+    st.header("📄 יצוא דוח Word")
+    st.caption("העלה קובץ Excel מעובד (פלט מטאב Excel), בחר מספר טבלה, סוג דף וכיוון")
+    st.markdown("---")
+
+    # ── TPH ──────────────────────────────────────────────────────────────────
+    st.subheader("🛢️ טבלת TPH")
+    col1, col2, col3, col4 = st.columns([3,1,1,1])
+    with col1:
+        tph_file = st.file_uploader("העלה קובץ Excel של TPH (פלט מעובד)", type=["xlsx","xls"], key="wtph")
+    with col2:
+        tph_num = st.number_input("מספר טבלה", min_value=1, max_value=99, value=1, step=1, key="wtph_num")
+    with col3:
+        tph_page = st.selectbox("סוג דף", ["A4","Tabloid"], key="wtph_page")
+    with col4:
+        tph_land = st.selectbox("כיוון", ["לאורך","לרוחב"], key="wtph_land") == "לרוחב"
+
+    if tph_file:
+        if st.button("📄 צור דוח Word – TPH", type="primary", use_container_width=True):
+            try:
+                with st.spinner("⏳ בונה דוח..."):
+                    docx_bytes = build_tph_word(tph_file.read(), int(tph_num), tph_page, tph_land)
+                st.success("✅ הדוח נוצר!")
+                st.download_button("⬇️ הורד דוח Word", data=docx_bytes,
+                    file_name=f"TPH_table_{tph_num}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True)
+            except Exception as e:
+                st.error(f"❌ שגיאה: {e}")
+                import traceback; st.code(traceback.format_exc())
+    else:
+        st.info("👆 העלה קובץ Excel של TPH")
