@@ -1474,6 +1474,7 @@ tab_excel, tab_word = st.tabs(["📊 יצוא Excel", "📄 יצוא Word"])
 # ── TPH WORD EXPORT ──────────────────────────────────────────────────────────
 def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
     from openpyxl import load_workbook as lw
+    import re as _re
 
     PAGE_DXA  = {"A4":(11906,16838), "Tabloid":(17280,22320)}
     MARGIN    = 720
@@ -1506,18 +1507,49 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         v = hdr_rows[r][c].value
         return str(v).strip() if v is not None else ""
 
-    # VSL ו-TIER1 לכל עמודה
     vsl_vals   = [cv(3,2), cv(3,3), cv(3,4)]
     tier1_vals = [cv(4,2), cv(4,3), cv(4,4)]
-    # אם ריק - קח מעמודה אחרת
     for i in range(3):
         if not vsl_vals[i]:
             vsl_vals[i] = next((v for v in vsl_vals if v), "350")
         if not tier1_vals[i]:
             tier1_vals[i] = next((v for v in tier1_vals if v), "350")
 
+    # ── פורמט ערכים ──────────────────────────────────────────────────────────
+    def fmt_val(raw):
+        """פורמט ערך: פסיקים במספרים, מקף בשמות S1->S-1"""
+        if raw is None: return ""
+        s = str(raw).strip()
+        if not s: return ""
+        # מקף בשמות קידוח: אות(ות) + מספר → אות-מספר  e.g. S1->S-1, BH12->BH-12
+        m = _re.match(r'^([A-Za-z]+)(\d+)$', s)
+        if m:
+            return f"{m.group(1)}-{m.group(2)}"
+        # פסיקים במספרים שלמים / עשרוניים (לא ערכי "<X")
+        if s.startswith('<'):
+            return s
+        try:
+            f = float(s)
+            if f == int(f) and abs(f) >= 1000:
+                return f"{int(f):,}"
+            elif abs(f) >= 1000:
+                return f"{f:,.1f}"
+            else:
+                return s
+        except:
+            return s
+
+    def is_eng_or_num(text):
+        """אמת אם הטקסט הוא אנגלית/מספר (לא עברית)"""
+        t = str(text).strip()
+        if not t: return False
+        has_heb = any('\u05d0' <= c <= '\u05ea' for c in t)
+        return not has_heb
+
+    def has_heb(text):
+        return any('\u05d0' <= c <= '\u05ea' for c in str(text))
+
     # ── קבץ שורות לפי קידוח ──────────────────────────────────────────────────
-    # כל קידוח = רשימה של שורות שלו
     drills = []
     current_sid = None
     current_group = []
@@ -1533,34 +1565,33 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
     if current_group:
         drills.append((current_sid, current_group))
 
-    # ── כמה שורות נכנסות בדף ────────────────────────────────────────────────
-    # גובה שורות קבוע (twips) - מונע גלישה בין עמודים
-    ROW_H_TWIPS = 370   # ~0.65cm - מינימלי אך קריא
-    HDR_H_TWIPS = 390
+    # ── חישוב שורות לדף ──────────────────────────────────────────────────────
+    ROW_H_TWIPS = 340
+    HDR_H_TWIPS = 370
+    SPACER_H    = 280   # רווח 1.5 שורה בין כותרת לטבלה
+    TITLE_H     = 380
+    LEGEND_H    = 360
 
     USABLE_H  = page_h - 2*MARGIN
-    TITLE_H   = 340
-    LEGEND_H  = 340
-    HDR_TOTAL = 5 * HDR_H_TWIPS
-    avail     = USABLE_H - TITLE_H - LEGEND_H - HDR_TOTAL
-    rows_pp   = max(10, int(avail / ROW_H_TWIPS))
+    HDR_TOTAL = N_HDR * HDR_H_TWIPS
+    avail     = USABLE_H - TITLE_H - SPACER_H - LEGEND_H - HDR_TOTAL
+    rows_pp   = max(8, int(avail / ROW_H_TWIPS))
 
-    # ── חלק קידוחים לדפים - לא לפצל קידוח בין דפים ─────────────────────────
+    # ── חלק לדפים - לא לפצל קידוח ────────────────────────────────────────────
     pages = []
-    current_page = []
-    current_count = 0
+    cur_page = []
+    cur_count = 0
     for sid, drill_rows in drills:
         n = len(drill_rows)
-        if current_count > 0 and current_count + n > rows_pp:
-            # הקידוח הזה לא נכנס - פתח דף חדש
-            pages.append(current_page)
-            current_page = [(sid, drill_rows)]
-            current_count = n
+        if cur_count > 0 and cur_count + n > rows_pp:
+            pages.append(cur_page)
+            cur_page = [(sid, drill_rows)]
+            cur_count = n
         else:
-            current_page.append((sid, drill_rows))
-            current_count += n
-    if current_page:
-        pages.append(current_page)
+            cur_page.append((sid, drill_rows))
+            cur_count += n
+    if cur_page:
+        pages.append(cur_page)
 
     total_parts = len(pages)
 
@@ -1629,9 +1660,6 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         if restart: vm.set(qn('w:val'),'restart')
         tcPr.append(vm)
 
-    def has_heb(text):
-        return any('\u05d0' <= c <= '\u05ea' for c in str(text))
-
     def set_row_h(row, h_twips):
         tr = row._tr
         trPr = tr.find(qn('w:trPr'))
@@ -1643,39 +1671,57 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         trH.set(qn('w:hRule'), 'exact')
         trPr.append(trH)
 
-    def write_cell(cell, text, bold=False, bg=WHITE, is_hdr=False):
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        set_bg(cell, bg); set_brd(cell)
-        p = cell.paragraphs[0]; p.clear()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    def add_rtl_run(para, text, bold=False, size_heb=13, size_eng=11,
+                    color_hex=None, underline=False):
+        """מוסיף run עם הגופן הנכון לפי שפה"""
+        if not text: return
+        run = para.add_run(text)
+        run.bold = bold
+        run.underline = underline
+        if color_hex:
+            run.font.color.rgb = RGBColor.from_string(color_hex)
+        if has_heb(text):
+            run.font.name = "David"
+            run.font.size = Pt(size_heb)
+        else:
+            run.font.name = "Times New Roman"
+            run.font.size = Pt(size_eng)
+        rPr = run._r.get_or_add_rPr()
+        rtl_r = OxmlElement('w:rtl'); rPr.append(rtl_r)
+        return run
+
+    def make_rtl_para(doc, align='center'):
+        p = doc.add_paragraph()
         p.paragraph_format.space_before = Pt(0)
         p.paragraph_format.space_after  = Pt(0)
         pPr = p._p.get_or_add_pPr()
-        bidi = OxmlElement('w:bidi'); pPr.append(bidi)
-        txt = str(text) if text is not None else ""
+        pPr.append(OxmlElement('w:bidi'))
+        jc = OxmlElement('w:jc'); jc.set(qn('w:val'), align); pPr.append(jc)
+        return p
+
+    def write_cell(cell, text, bold=False, bg=WHITE):
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        set_bg(cell, bg); set_brd(cell)
+        p = cell.paragraphs[0]; p.clear()
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after  = Pt(0)
+        pPr = p._p.get_or_add_pPr()
+        pPr.append(OxmlElement('w:bidi'))
+        jc = OxmlElement('w:jc'); jc.set(qn('w:val'),'center'); pPr.append(jc)
+        txt = fmt_val(text) if not any('\u05d0'<=c<='\u05ea' for c in str(text or '')) else str(text or '')
         if not txt: return
-        run = p.add_run(txt)
-        run.bold = bold
-        if has_heb(txt):
-            run.font.name = "David"
-            run.font.size = Pt(10) if not is_hdr else Pt(10)
-        else:
-            run.font.name = "Times New Roman"
-            run.font.size = Pt(9) if not is_hdr else Pt(9)
+        add_rtl_run(p, txt, bold=bold, size_heb=13, size_eng=11)
 
     def build_header(table):
-        """בנה 5 שורות כותרת"""
         for hi in range(N_HDR):
             set_row_h(table.rows[hi], HDR_H_TWIPS)
-        # שורה 0
-        write_cell(table.cell(0,0), "שם קידוח", bold=True, bg=HDR_BLUE, is_hdr=True)
+        write_cell(table.cell(0,0), "שם קידוח", bold=True, bg=HDR_BLUE)
         set_vm(table.cell(0,0), restart=True)
-        write_cell(table.cell(0,1), "עומק", bold=True, bg=HDR_BLUE, is_hdr=True)
+        write_cell(table.cell(0,1), "עומק", bold=True, bg=HDR_BLUE)
         set_vm(table.cell(0,1), restart=True)
-        write_cell(table.cell(0,2), "אנליזה", bold=True, bg=HDR_BLUE, is_hdr=True)
+        write_cell(table.cell(0,2), "אנליזה", bold=True, bg=HDR_BLUE)
         for ci,lbl in enumerate(["TPH DRO","TPH ORO","Total TPH"],3):
-            write_cell(table.cell(0,ci), lbl, bold=True, bg=HDR_BLUE, is_hdr=True)
-        # שורות 1-4
+            write_cell(table.cell(0,ci), lbl, bold=True, bg=HDR_BLUE)
         sub = [("יחידות",["mg/kg","mg/kg","mg/kg"]),
                ("CAS",   ["C-10-C-40","C-10-C-40","C-10-C-40"]),
                ("VSL",   vsl_vals),
@@ -1683,11 +1729,11 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         for hi,(lbl,vals) in enumerate(sub,1):
             write_cell(table.cell(hi,0),"",bg=HDR_BLUE); set_vm(table.cell(hi,0))
             c12=table.cell(hi,1); c12.merge(table.cell(hi,2))
-            write_cell(c12,lbl,bold=True,bg=HDR_BLUE,is_hdr=True)
+            write_cell(c12,lbl,bold=True,bg=HDR_BLUE)
             for ci,v in enumerate(vals,3):
-                write_cell(table.cell(hi,ci),v,bold=True,bg=HDR_BLUE,is_hdr=True)
+                write_cell(table.cell(hi,ci),v,bold=True,bg=HDR_BLUE)
 
-    # ── בנה Document ───────────────────────────────────────────────────────────
+    # ── בנה Document ─────────────────────────────────────────────────────────
     doc = Document()
     for p in doc.paragraphs:
         p._element.getparent().remove(p._element)
@@ -1700,30 +1746,19 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         section = doc.sections[0] if part_idx == 0 else doc.add_section()
         set_page(section)
 
-        # כותרת
-        p = doc.add_paragraph()
-        p.paragraph_format.space_before = Pt(0)
-        p.paragraph_format.space_after  = Pt(0)
-        p.paragraph_format.keep_with_next = True
-        # RTL paragraph, centered
-        pPr = p._p.get_or_add_pPr()
-        bidi_el = OxmlElement('w:bidi'); pPr.append(bidi_el)
-        jc = OxmlElement('w:jc'); jc.set(qn('w:val'), 'center'); pPr.append(jc)
-        run = p.add_run(title)
-        run.bold = True; run.underline = True
-        run.font.name = "David"; run.font.size = Pt(13)
-        # set run RTL
-        rPr = run._r.get_or_add_rPr()
-        rtl_el = OxmlElement('w:rtl'); rPr.append(rtl_el)
+        # כותרת - ממורכזת, מודגשת, עם קו תחתון
+        tp = make_rtl_para(doc, 'center')
+        tp.paragraph_format.keep_with_next = True
+        add_rtl_run(tp, title, bold=True, underline=True, size_heb=13, size_eng=11)
 
-        # רווח שורה וחצי אחרי הכותרת (לפני הטבלה)
-        spacer = doc.add_paragraph()
-        spacer.paragraph_format.space_before = Pt(0)
-        spacer.paragraph_format.space_after  = Pt(0)
-        spacer.paragraph_format.line_spacing = Pt(9)
-        spacer.paragraph_format.keep_with_next = True
+        # רווח קבוע 1.5 שורה בין כותרת לטבלה
+        sp = doc.add_paragraph()
+        sp.paragraph_format.space_before = Pt(0)
+        sp.paragraph_format.space_after  = Pt(0)
+        sp.paragraph_format.line_spacing = Twips(SPACER_H)
+        sp.paragraph_format.keep_with_next = True
 
-        # ספור שורות בדף
+        # טבלה
         n_data = sum(len(dr) for _, dr in page_drills)
         table  = doc.add_table(rows=N_HDR + n_data, cols=N_COLS)
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -1731,7 +1766,6 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         for ri in range(N_HDR + n_data):
             for ci in range(N_COLS):
                 set_cw(table.cell(ri,ci), col_ws[ci])
-
         build_header(table)
 
         # נתונים
@@ -1741,15 +1775,17 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
             for sub_ri, xl_row in enumerate(drill_rows):
                 row_idx = N_HDR + ri
                 dep = xl_row[1].value
+                sid_fmt = fmt_val(sid) if sid else ""
                 if sub_ri == 0:
-                    write_cell(table.cell(row_idx,0), str(sid) if sid else "", bold=True, bg=WHITE)
+                    write_cell(table.cell(row_idx,0), sid_fmt, bold=True, bg=WHITE)
                     set_vm(table.cell(row_idx,0), restart=True)
                 else:
                     write_cell(table.cell(row_idx,0), "", bg=WHITE)
                     set_vm(table.cell(row_idx,0))
                 set_row_h(table.rows[row_idx], ROW_H_TWIPS)
                 cd = table.cell(row_idx,1); cd.merge(table.cell(row_idx,2))
-                write_cell(cd, str(dep) if dep is not None else "", bg=WHITE)
+                dep_fmt = fmt_val(dep)
+                write_cell(cd, dep_fmt, bg=WHITE)
                 for ci in range(3,6):
                     xl_c = xl_row[ci] if ci < len(xl_row) else None
                     val  = xl_c.value if xl_c else ""
@@ -1760,41 +1796,29 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
                     write_cell(table.cell(row_idx,ci), str(val) if val is not None else "", bg=bg)
                 ri += 1
 
-        # מקרא
-        if has_yel or has_org:
-            lp = doc.add_paragraph()
-            lp.paragraph_format.space_before = Pt(3)
-            lp.paragraph_format.space_after  = Pt(0)
-            # RTL paragraph aligned to right (visually right for Hebrew reader)
-            pPr2 = lp._p.get_or_add_pPr()
-            bidi2 = OxmlElement('w:bidi'); pPr2.append(bidi2)
-            jc2 = OxmlElement('w:jc'); jc2.set(qn('w:val'), 'right'); pPr2.append(jc2)
-
-            def leg_run(para, text, color_hex=None, bold=False):
-                r = para.add_run(text)
-                r.font.name = "David"; r.font.size = Pt(10)
-                r.bold = bold
-                if color_hex:
-                    r.font.color.rgb = RGBColor.from_string(color_hex)
-                rPr = r._r.get_or_add_rPr()
-                rtl_r = OxmlElement('w:rtl'); rPr.append(rtl_r)
-                return r
-
-            if has_yel:
-                # סדר RTL: הטקסט הוא "בצהוב - חריגה מערך הסף VSL"
-                # ב-RTL: הראשון שנכתב יופיע בימין
-                leg_run(lp, "■ ", color_hex="CCCC00")
-                leg_run(lp, "בצהוב", color_hex="CCCC00", bold=True)
-                leg_run(lp, " - חריגה מערך הסף VSL")
-            if has_yel and has_org:
-                leg_run(lp, "     ")
-            if has_org:
-                leg_run(lp, "■ ", color_hex="FFC000")
-                leg_run(lp, "בכתום", color_hex="FFC000", bold=True)
-                leg_run(lp, " - חריגה מערך הסף TIER 1")
+        # מקרא - ימין, אותו עמוד כמו הטבלה
+        lp = make_rtl_para(doc, 'right')
+        lp.paragraph_format.space_before = Pt(4)
+        # keep_with_next=False כאן כי הוא אחרון לפני מעבר עמוד
+        if has_yel:
+            add_rtl_run(lp, "■ ", color_hex="CCCC00", size_heb=10, size_eng=10)
+            add_rtl_run(lp, "בצהוב", bold=True, color_hex="CCCC00", size_heb=10, size_eng=10)
+            add_rtl_run(lp, " - חריגה מערך הסף VSL", size_heb=10, size_eng=10)
+        if has_yel and has_org:
+            add_rtl_run(lp, "     ", size_heb=10, size_eng=10)
+        if has_org:
+            add_rtl_run(lp, "■ ", color_hex="FFC000", size_heb=10, size_eng=10)
+            add_rtl_run(lp, "בכתום", bold=True, color_hex="FFC000", size_heb=10, size_eng=10)
+            add_rtl_run(lp, " - חריגה מערך הסף TIER 1", size_heb=10, size_eng=10)
+        # אם אין חריגות - פסקה ריקה לשמור מקום
+        if not has_yel and not has_org:
+            ep = doc.add_paragraph()
+            ep.paragraph_format.space_before = Pt(0)
+            ep.paragraph_format.space_after  = Pt(0)
 
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     return buf.getvalue()
+
 
 with tab_excel:
     # ── SIDEBAR
