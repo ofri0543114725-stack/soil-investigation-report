@@ -1702,15 +1702,26 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
 
         # כותרת
         p = doc.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        pPr = p._p.get_or_add_pPr()
-        bidi = OxmlElement('w:bidi'); pPr.append(bidi)
         p.paragraph_format.space_before = Pt(0)
-        p.paragraph_format.space_after  = Pt(4)
-        p.paragraph_format.keep_with_next = True  # כותרת נשארת עם הטבלה
+        p.paragraph_format.space_after  = Pt(0)
+        p.paragraph_format.keep_with_next = True
+        # RTL paragraph, centered
+        pPr = p._p.get_or_add_pPr()
+        bidi_el = OxmlElement('w:bidi'); pPr.append(bidi_el)
+        jc = OxmlElement('w:jc'); jc.set(qn('w:val'), 'center'); pPr.append(jc)
         run = p.add_run(title)
         run.bold = True; run.underline = True
         run.font.name = "David"; run.font.size = Pt(13)
+        # set run RTL
+        rPr = run._r.get_or_add_rPr()
+        rtl_el = OxmlElement('w:rtl'); rPr.append(rtl_el)
+
+        # רווח שורה וחצי אחרי הכותרת (לפני הטבלה)
+        spacer = doc.add_paragraph()
+        spacer.paragraph_format.space_before = Pt(0)
+        spacer.paragraph_format.space_after  = Pt(0)
+        spacer.paragraph_format.line_spacing = Pt(9)
+        spacer.paragraph_format.keep_with_next = True
 
         # ספור שורות בדף
         n_data = sum(len(dr) for _, dr in page_drills)
@@ -1752,26 +1763,35 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         # מקרא
         if has_yel or has_org:
             lp = doc.add_paragraph()
-            lp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            pPr2 = lp._p.get_or_add_pPr()
-            bd = OxmlElement('w:bidi'); pPr2.append(bd)
             lp.paragraph_format.space_before = Pt(3)
             lp.paragraph_format.space_after  = Pt(0)
+            # RTL paragraph aligned to right (visually right for Hebrew reader)
+            pPr2 = lp._p.get_or_add_pPr()
+            bidi2 = OxmlElement('w:bidi'); pPr2.append(bidi2)
+            jc2 = OxmlElement('w:jc'); jc2.set(qn('w:val'), 'right'); pPr2.append(jc2)
+
+            def leg_run(para, text, color_hex=None, bold=False):
+                r = para.add_run(text)
+                r.font.name = "David"; r.font.size = Pt(10)
+                r.bold = bold
+                if color_hex:
+                    r.font.color.rgb = RGBColor.from_string(color_hex)
+                rPr = r._r.get_or_add_rPr()
+                rtl_r = OxmlElement('w:rtl'); rPr.append(rtl_r)
+                return r
+
             if has_yel:
-                r1 = lp.add_run("■ "); r1.font.name="David"; r1.font.size=Pt(10)
-                r1.font.color.rgb = RGBColor.from_string("CCCC00")
-                r2 = lp.add_run("בצהוב"); r2.bold=True; r2.font.name="David"; r2.font.size=Pt(10)
-                r2.font.color.rgb = RGBColor.from_string("CCCC00")
-                r3 = lp.add_run(" - חריגה מערך הסף VSL    ")
-                r3.font.name="David"; r3.font.size=Pt(10)
+                # סדר RTL: הטקסט הוא "בצהוב - חריגה מערך הסף VSL"
+                # ב-RTL: הראשון שנכתב יופיע בימין
+                leg_run(lp, "■ ", color_hex="CCCC00")
+                leg_run(lp, "בצהוב", color_hex="CCCC00", bold=True)
+                leg_run(lp, " - חריגה מערך הסף VSL")
+            if has_yel and has_org:
+                leg_run(lp, "     ")
             if has_org:
-                if has_yel: lp.add_run("   ")
-                r4 = lp.add_run("■ "); r4.font.name="David"; r4.font.size=Pt(10)
-                r4.font.color.rgb = RGBColor.from_string("FFC000")
-                r5 = lp.add_run("בכתום"); r5.bold=True; r5.font.name="David"; r5.font.size=Pt(10)
-                r5.font.color.rgb = RGBColor.from_string("FFC000")
-                r6 = lp.add_run(" - חריגה מערך הסף TIER 1")
-                r6.font.name="David"; r6.font.size=Pt(10)
+                leg_run(lp, "■ ", color_hex="FFC000")
+                leg_run(lp, "בכתום", color_hex="FFC000", bold=True)
+                leg_run(lp, " - חריגה מערך הסף TIER 1")
 
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     return buf.getvalue()
