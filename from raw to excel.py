@@ -1547,7 +1547,12 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         return not has_heb
 
     def has_heb(text):
-        return any('\u05d0' <= c <= '\u05ea' for c in str(text))
+        """עברית → David. מספר טהור → David. אנגלית/מעורב → TNR."""
+        t = str(text).strip()
+        if not t: return False
+        if any('\u05d0' <= c <= '\u05ea' for c in t): return True  # עברית
+        if any(c.isalpha() for c in t): return False                  # יש אות לטינית
+        return True  # רק מספרים/סמלים → David
 
     # ── קבץ שורות לפי קידוח ──────────────────────────────────────────────────
     drills = []
@@ -1673,44 +1678,47 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
 
     def add_rtl_run(para, text, bold=False, size_heb=13, size_eng=11,
                     color_hex=None, underline=False):
-        """מוסיף run עם הגופן הנכון לפי שפה + CS font + RTL"""
+        """XML-only run - ללא python-docx font setters שעלולים לדרוס"""
         if not text: return
-        run = para.add_run(text)
-        # Set bold directly in rPr XML to avoid python-docx setting w:b val="0"
-        if bold:
-            b_el = OxmlElement('w:b')
-            run._r.get_or_add_rPr().append(b_el)
-        if underline:
-            u_el = OxmlElement('w:u'); u_el.set(qn('w:val'), 'single')
-            run._r.get_or_add_rPr().append(u_el)
+        from lxml import etree as _lxml_r
+        _WR = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+        def _wr(tag): return f'{{{_WR}}}{tag}'
+
         use_heb = has_heb(text)
-        fname = "David" if use_heb else "Times New Roman"
-        fsize = Pt(size_heb) if use_heb else Pt(size_eng)
-        run.font.size = fsize
-        # Set ALL font slots including Complex Script
-        rPr = run._r.get_or_add_rPr()
-        for old in rPr.findall(qn('w:rFonts')): rPr.remove(old)
-        rFonts = OxmlElement('w:rFonts')
-        rFonts.set(qn('w:ascii'),    fname)
-        rFonts.set(qn('w:hAnsi'),   fname)
-        rFonts.set(qn('w:cs'),      fname)  # Critical for Hebrew!
-        rFonts.set(qn('w:eastAsia'), fname)
-        rPr.insert(0, rFonts)
-        # CS font size
-        for old in rPr.findall(qn('w:szCs')): rPr.remove(old)
-        szCs = OxmlElement('w:szCs')
-        szCs.set(qn('w:val'), str(int(fsize.pt * 2)))
-        rPr.append(szCs)
-        # Color
+        fname   = "David" if use_heb else "Times New Roman"
+        fsize   = str(size_heb * 2) if use_heb else str(size_eng * 2)  # half-points
+
+        r_el   = _lxml_r.SubElement(para._p, _wr('r'))
+        rPr_el = _lxml_r.SubElement(r_el,   _wr('rPr'))
+
+        # fonts - כל ה-slots
+        rF = _lxml_r.SubElement(rPr_el, _wr('rFonts'))
+        for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_wr(a), fname)
+
+        # bold
+        if bold:
+            b  = _lxml_r.SubElement(rPr_el, _wr('b'));  b.set(_wr('val'), '1')
+            bC = _lxml_r.SubElement(rPr_el, _wr('bCs')); bC.set(_wr('val'), '1')
+
+        # underline
+        if underline:
+            u = _lxml_r.SubElement(rPr_el, _wr('u')); u.set(_wr('val'), 'single')
+
+        # color
         if color_hex:
-            for old in rPr.findall(qn('w:color')): rPr.remove(old)
-            col_el = OxmlElement('w:color')
-            col_el.set(qn('w:val'), color_hex)
-            rPr.append(col_el)
-        # RTL run direction
-        for old in rPr.findall(qn('w:rtl')): rPr.remove(old)
-        rPr.append(OxmlElement('w:rtl'))
-        return run
+            col = _lxml_r.SubElement(rPr_el, _wr('color')); col.set(_wr('val'), color_hex)
+
+        # size
+        sz   = _lxml_r.SubElement(rPr_el, _wr('sz'));   sz.set(_wr('val'), fsize)
+        szCs = _lxml_r.SubElement(rPr_el, _wr('szCs')); szCs.set(_wr('val'), fsize)
+
+        # RTL
+        _lxml_r.SubElement(rPr_el, _wr('rtl'))
+
+        # text
+        t_el = _lxml_r.SubElement(r_el, _wr('t'))
+        t_el.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+        t_el.text = str(text)
 
     def make_rtl_para(doc, align='center'):
         p = doc.add_paragraph()
@@ -1799,26 +1807,31 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         jc_el = _lxml.SubElement(pPr_t, _w('jc'))
         jc_el.set(_w('val'), 'center')
 
-        # run
-        r_el  = _lxml.SubElement(tp._p, _w('r'))
-        rPr_el = _lxml.SubElement(r_el, _w('rPr'))
-        rF = _lxml.SubElement(rPr_el, _w('rFonts'))
-        for a in ('ascii','hAnsi','cs','eastAsia'):
-            rF.set(_w(a), 'David')
-        b_el = _lxml.SubElement(rPr_el, _w('b'))   # bold
-        b_el.set(_w('val'), '1')                   # explicit val=1 overrides style
-        bCs_el = _lxml.SubElement(rPr_el, _w('bCs'))  # bold complex script (Hebrew)
-        bCs_el.set(_w('val'), '1')
-        u_el = _lxml.SubElement(rPr_el, _w('u'))
-        u_el.set(_w('val'), 'single')              # underline
-        sz_el = _lxml.SubElement(rPr_el, _w('sz'))
-        sz_el.set(_w('val'), '26')                 # 13pt
-        szCs_el = _lxml.SubElement(rPr_el, _w('szCs'))
-        szCs_el.set(_w('val'), '26')
-        _lxml.SubElement(rPr_el, _w('rtl'))        # RTL run
-        t_el = _lxml.SubElement(r_el, _w('t'))
-        t_el.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
-        t_el.text = title
+        # פצל כותרת לפי אנגלית/עברית-מספרים וצור run לכל חלק
+        import re as _re_title
+        def _title_segments(txt):
+            parts = _re_title.split(r'([A-Za-z]+)', txt)
+            return [(p, bool(_re_title.match(r'^[A-Za-z]+$', p))) for p in parts if p]
+
+        def _add_title_run(parent_p, text, is_eng):
+            fname = 'Times New Roman' if is_eng else 'David'
+            fsize = '22' if is_eng else '26'  # 11pt=22, 13pt=26 half-points
+            r_el  = _lxml.SubElement(parent_p, _w('r'))
+            rPr_el = _lxml.SubElement(r_el, _w('rPr'))
+            rF = _lxml.SubElement(rPr_el, _w('rFonts'))
+            for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a), fname)
+            b_el = _lxml.SubElement(rPr_el, _w('b')); b_el.set(_w('val'), '1')
+            bCs_el = _lxml.SubElement(rPr_el, _w('bCs')); bCs_el.set(_w('val'), '1')
+            u_el = _lxml.SubElement(rPr_el, _w('u')); u_el.set(_w('val'), 'single')
+            sz_el = _lxml.SubElement(rPr_el, _w('sz')); sz_el.set(_w('val'), fsize)
+            szCs_el = _lxml.SubElement(rPr_el, _w('szCs')); szCs_el.set(_w('val'), fsize)
+            _lxml.SubElement(rPr_el, _w('rtl'))
+            t_el = _lxml.SubElement(r_el, _w('t'))
+            t_el.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+            t_el.text = text
+
+        for seg, is_eng in _title_segments(title):
+            _add_title_run(tp._p, seg, is_eng)
 
         # רווח קבוע 1.5 שורה בין כותרת לטבלה
         sp = doc.add_paragraph()
@@ -1884,16 +1897,23 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         jc_lp.set(_w2('val'), 'right')
         # ללא w:bidi - פסקת LTR עם right align = ויזואלית ימין
 
-        def leg_word_run(para, word, hl_val):
-            """מילה מודגשת עם הדגשת רקע"""
+        def leg_word_run(para, word, hex_color):
+            """מילה מודגשת עם צבע רקע מדויק"""
             r_el = _lxml2.SubElement(para._p, _w2('r'))
             rPr_el = _lxml2.SubElement(r_el, _w2('rPr'))
             rF = _lxml2.SubElement(rPr_el, _w2('rFonts'))
             for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w2(a), 'David')
-            _lxml2.SubElement(rPr_el, _w2('b'))
+            b_el = _lxml2.SubElement(rPr_el, _w2('b'))
+            b_el.set(_w2('val'), '1')
+            bCs_el = _lxml2.SubElement(rPr_el, _w2('bCs'))
+            bCs_el.set(_w2('val'), '1')
             sz = _lxml2.SubElement(rPr_el, _w2('sz')); sz.set(_w2('val'), '20')
             szC = _lxml2.SubElement(rPr_el, _w2('szCs')); szC.set(_w2('val'), '20')
-            hl = _lxml2.SubElement(rPr_el, _w2('highlight')); hl.set(_w2('val'), hl_val)
+            # צבע רקע מדויק עם shading
+            shd = _lxml2.SubElement(rPr_el, _w2('shd'))
+            shd.set(_w2('val'), 'clear')
+            shd.set(_w2('color'), 'auto')
+            shd.set(_w2('fill'), hex_color)
             _lxml2.SubElement(rPr_el, _w2('rtl'))
             t = _lxml2.SubElement(r_el, _w2('t'))
             t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
@@ -1913,12 +1933,12 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
             t.text = text
 
         if has_yel:
-            leg_word_run(lp, "בצהוב", "yellow")
+            leg_word_run(lp, "בצהוב", "FFFF00")
             leg_plain_run(lp, " - חריגה מערך הסף VSL")
         if has_yel and has_org:
             leg_plain_run(lp, "     ")
         if has_org:
-            leg_word_run(lp, "בכתום", "orange")
+            leg_word_run(lp, "בכתום", "FFC000")
             leg_plain_run(lp, " - חריגה מערך הסף TIER 1")
 
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
