@@ -1755,7 +1755,7 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         sub = [("יחידות",["mg/kg","mg/kg","mg/kg"]),
                ("CAS",   ["C-10-C-40","C-10-C-40","C-10-C-40"]),
                ("VSL",   vsl_vals),
-               ("TIER 1",tier1_vals)]
+               (t1lbl,tier1_vals)]
         for hi,(lbl,vals) in enumerate(sub,1):
             write_cell(table.cell(hi,0),"",bg=HDR_BLUE); set_vm(table.cell(hi,0))
             c12=table.cell(hi,1); c12.merge(table.cell(hi,2))
@@ -1945,7 +1945,7 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
     return buf.getvalue()
 
 
-def build_metals_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
+def build_metals_word(xl_file_bytes, table_num, page_size="A3", landscape=True, t1lbl="TIER 1"):
     """בונה דוח Word לטבלת מתכות - זהה לTPH עם התאמות"""
     import io, re
     from lxml import etree as _lxml
@@ -2249,6 +2249,9 @@ def build_metals_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
                 # שורות 1-4 בעמודה 0: ריק (ימוזג)
                 if ci == 0 and hi > 0:
                     val_s = ""
+                # שורה 4 עמודה 1: החלף TIER 1 ב-t1lbl
+                if hi == 4 and ci == 1:
+                    val_s = t1lbl
                 write_cell(table.cell(hi, ci), val_s, bold=True, bg=HDR_BG,
                            size_heb=9, size_eng=7)
 
@@ -2418,6 +2421,20 @@ with tab_word:
     st.caption("העלה קובץ Excel מעובד מטאב Excel, בחר מספר טבלה וצור דוח Word")
     st.markdown("---")
 
+    # ── הגדרות TIER 1 משותפות לכל הטבלאות ───────────────────────────────────
+    with st.expander("⚙️ הגדרות TIER 1", expanded=True):
+        tw1, tw2, tw3 = st.columns(3)
+        with tw1:
+            w_land_use = st.selectbox("Land Use", ["Industrial","Residential"], key="w_land_use")
+        with tw2:
+            w_aquifer  = st.selectbox("Aquifer Sensitivity", ["A-1, A, B","B-1 or C"], key="w_aquifer")
+        with tw3:
+            w_depth_opts = ["Not Applicable"] if "b-1" in w_aquifer.lower() else ["0 - 6 m",">6 m"]
+            w_depth = st.selectbox("Depth to Groundwater", w_depth_opts, key="w_depth")
+    w_t1lbl = tier1_label(w_land_use, w_aquifer, w_depth)
+    st.caption(f"שורת TIER 1: **{w_t1lbl}**")
+    st.markdown("---")
+
     # ── TPH ──────────────────────────────────────────────────────────────────
     with st.expander("🛢️ טבלת TPH", expanded=True):
         wc1, wc2, wc3 = st.columns([4,1,1])
@@ -2432,7 +2449,7 @@ with tab_word:
             if st.button("📄 צור דוח Word – TPH", type="primary", use_container_width=True, key="btn_tph"):
                 try:
                     with st.spinner("⏳ בונה דוח..."):
-                        docx_bytes = build_tph_word(tph_file.read(), int(tph_num), tph_page, tph_land)
+                        docx_bytes = build_tph_word(tph_file.read(), int(tph_num), tph_page, tph_land, t1lbl=w_t1lbl)
                     st.success("✅ הדוח נוצר!")
                     st.download_button("⬇️ הורד דוח Word – TPH", data=docx_bytes,
                         file_name=f"TPH_table_{tph_num}.docx",
@@ -2459,7 +2476,7 @@ with tab_word:
             if st.button("📄 צור דוח Word – Metals", type="primary", use_container_width=True, key="btn_metals"):
                 try:
                     with st.spinner("⏳ בונה דוח..."):
-                        docx_bytes = build_metals_word(metals_file.read(), int(metals_num), page_size=metals_page, landscape=metals_land)
+                        docx_bytes = build_metals_word(metals_file.read(), int(metals_num), page_size=metals_page, landscape=metals_land, t1lbl=w_t1lbl)
                     st.success("✅ הדוח נוצר!")
                     st.download_button("⬇️ הורד דוח Word – Metals", data=docx_bytes,
                         file_name=f"Metals_table_{metals_num}.docx",
