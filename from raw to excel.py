@@ -2409,9 +2409,51 @@ with tab_excel:
             if not wb_out.sheetnames:
                 wb_out.create_sheet("Results"); st.warning("לא זוהו קבוצות")
             st.markdown("---")
+
+            # ── קובץ משולב ───────────────────────────────────────────────────
             buf=io.BytesIO(); wb_out.save(buf); buf.seek(0)
-            st.download_button("⬇️ הורד קובץ Excel מעובד",data=buf,file_name="soil_report.xlsx",
+            st.download_button("⬇️ הורד קובץ Excel מלא (כל הגיליונות)",data=buf,file_name="soil_report.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+
+            # ── קבצים נפרדים לכל סוג ─────────────────────────────────────────
+            st.markdown("**⬇️ הורד קבצים נפרדים:**")
+            dl_cols = st.columns(4)
+
+            def make_single_wb(write_fn, df, name):
+                """בנה workbook עם גיליון אחד"""
+                wb = Workbook(); wb.remove(wb.active)
+                write_fn(wb.create_sheet(name), df, thresh_dict, t1col, t1lbl)
+                b = io.BytesIO(); wb.save(b); b.seek(0)
+                return b
+
+            if not tph_df.empty:
+                with dl_cols[0]:
+                    st.download_button("🛢️ TPH",
+                        data=make_single_wb(write_tph_sheet, tph_df, "TPH"),
+                        file_name="TPH.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True)
+            if not metals_df.empty:
+                with dl_cols[1]:
+                    st.download_button("⚗️ Metals",
+                        data=make_single_wb(write_metals_sheet, metals_df, "Metals"),
+                        file_name="Metals.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True)
+            if not voc_df.empty:
+                with dl_cols[2]:
+                    st.download_button("🧪 VOC+SVOC",
+                        data=make_single_wb(write_voc_sheet, voc_df, "VOC+SVOC"),
+                        file_name="VOC_SVOC.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True)
+            if not pfas_df.empty:
+                with dl_cols[3]:
+                    st.download_button("🔬 PFAS",
+                        data=make_single_wb(write_pfas_sheet, pfas_df, "PFAS"),
+                        file_name="PFAS.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True)
 
 
 
