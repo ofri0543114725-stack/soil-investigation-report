@@ -1573,7 +1573,7 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
     # ── חישוב שורות לדף ──────────────────────────────────────────────────────
     ROW_H_TWIPS = 340
     HDR_H_TWIPS = 370
-    SPACER_H    = 280   # רווח 1.5 שורה בין כותרת לטבלה
+    SPACER_H    = 480   # רווח 1.5 שורה בין כותרת לטבלה
     TITLE_H     = 380
     LEGEND_H    = 360
 
@@ -2262,6 +2262,18 @@ def build_metals_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
             if hi == 0:
                 vm.set(qn('w:val'), 'restart')
             tcPr.append(vm)
+
+        # מזג שורות 0-1 בעמודה 1 (עומק - ללא יחידות)
+        for hi in range(2):
+            tc   = table.cell(hi, 1)._tc
+            tcPr = tc.get_or_add_tcPr()
+            for old in tcPr.findall(qn('w:vMerge')): tcPr.remove(old)
+            vm = OxmlElement('w:vMerge')
+            if hi == 0:
+                vm.set(qn('w:val'), 'restart')
+            tcPr.append(vm)
+        # נקה טקסט מתא עומק שורה 1
+        p = table.cell(1, 1).paragraphs[0]; p.clear()
 
         # ── שורות נתונים ─────────────────────────────────────────────────────
         has_yel = False; has_org = False
