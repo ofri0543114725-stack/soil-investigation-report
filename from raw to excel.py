@@ -1910,13 +1910,11 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
             t.text = text
 
         if has_yel:
-            leg_plain_run(lp, "■ ")
             leg_word_run(lp, "בצהוב", "yellow")
             leg_plain_run(lp, " - חריגה מערך הסף VSL")
         if has_yel and has_org:
-            leg_plain_run(lp, "   ")
+            leg_plain_run(lp, "     ")
         if has_org:
-            leg_plain_run(lp, "■ ")
             leg_word_run(lp, "בכתום", "orange")
             leg_plain_run(lp, " - חריגה מערך הסף TIER 1")
 
