@@ -1679,7 +1679,7 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
 
     def add_rtl_run(para, text, bold=False, size_heb=13, size_eng=11,
                     color_hex=None, underline=False):
-        """XML-only run - ללא python-docx font setters שעלולים לדרוס"""
+        """XML-only run - תומך ב-newlines"""
         if not text: return
         from lxml import etree as _lxml_r
         _WR = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
@@ -1687,39 +1687,37 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
 
         use_heb = has_heb(text)
         fname   = "David" if use_heb else "Times New Roman"
-        fsize   = str(size_heb * 2) if use_heb else str(size_eng * 2)  # half-points
+        fsize   = str(size_heb * 2) if use_heb else str(size_eng * 2)
 
-        r_el   = _lxml_r.SubElement(para._p, _wr('r'))
-        rPr_el = _lxml_r.SubElement(r_el,   _wr('rPr'))
+        lines = str(text).split('\n')
 
-        # fonts - כל ה-slots
-        rF = _lxml_r.SubElement(rPr_el, _wr('rFonts'))
-        for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_wr(a), fname)
+        def _make_run(txt):
+            r_el   = _lxml_r.SubElement(para._p, _wr('r'))
+            rPr_el = _lxml_r.SubElement(r_el,   _wr('rPr'))
+            rF = _lxml_r.SubElement(rPr_el, _wr('rFonts'))
+            for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_wr(a), fname)
+            if bold:
+                b  = _lxml_r.SubElement(rPr_el, _wr('b'));  b.set(_wr('val'), '1')
+                bC = _lxml_r.SubElement(rPr_el, _wr('bCs')); bC.set(_wr('val'), '1')
+            if underline:
+                u = _lxml_r.SubElement(rPr_el, _wr('u')); u.set(_wr('val'), 'single')
+            if color_hex:
+                col = _lxml_r.SubElement(rPr_el, _wr('color')); col.set(_wr('val'), color_hex)
+            sz   = _lxml_r.SubElement(rPr_el, _wr('sz'));   sz.set(_wr('val'), fsize)
+            szCs = _lxml_r.SubElement(rPr_el, _wr('szCs')); szCs.set(_wr('val'), fsize)
+            _lxml_r.SubElement(rPr_el, _wr('rtl'))
+            t_el = _lxml_r.SubElement(r_el, _wr('t'))
+            t_el.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+            t_el.text = txt
 
-        # bold
-        if bold:
-            b  = _lxml_r.SubElement(rPr_el, _wr('b'));  b.set(_wr('val'), '1')
-            bC = _lxml_r.SubElement(rPr_el, _wr('bCs')); bC.set(_wr('val'), '1')
+        def _make_br():
+            br_r = _lxml_r.SubElement(para._p, _wr('r'))
+            _lxml_r.SubElement(br_r, _wr('br'))
 
-        # underline
-        if underline:
-            u = _lxml_r.SubElement(rPr_el, _wr('u')); u.set(_wr('val'), 'single')
-
-        # color
-        if color_hex:
-            col = _lxml_r.SubElement(rPr_el, _wr('color')); col.set(_wr('val'), color_hex)
-
-        # size
-        sz   = _lxml_r.SubElement(rPr_el, _wr('sz'));   sz.set(_wr('val'), fsize)
-        szCs = _lxml_r.SubElement(rPr_el, _wr('szCs')); szCs.set(_wr('val'), fsize)
-
-        # RTL
-        _lxml_r.SubElement(rPr_el, _wr('rtl'))
-
-        # text
-        t_el = _lxml_r.SubElement(r_el, _wr('t'))
-        t_el.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
-        t_el.text = str(text)
+        for i, line in enumerate(lines):
+            if i > 0:
+                _make_br()
+            _make_run(line)
 
     def make_rtl_para(doc, align='center'):
         p = doc.add_paragraph()
@@ -2079,29 +2077,41 @@ def build_metals_word(xl_file_bytes, table_num, page_size="A3", landscape=True, 
 
     def add_rtl_run(para, text, bold=False, size_heb=9, size_eng=7,
                     color_hex=None, underline=False):
-        """XML-only run"""
+        """XML-only run - תומך ב-newlines"""
         if not str(text): return
+        lines = str(text).split('\n')
         use_heb = has_heb(text)
         fname   = "David" if use_heb else "Times New Roman"
         fsize   = str(size_heb * 2) if use_heb else str(size_eng * 2)
 
-        r_el   = _lxml.SubElement(para._p, _w('r'))
-        rPr_el = _lxml.SubElement(r_el,   _w('rPr'))
-        rF = _lxml.SubElement(rPr_el, _w('rFonts'))
-        for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a), fname)
-        if bold:
-            b  = _lxml.SubElement(rPr_el, _w('b'));  b.set(_w('val'), '1')
-            bC = _lxml.SubElement(rPr_el, _w('bCs')); bC.set(_w('val'), '1')
-        if underline:
-            u = _lxml.SubElement(rPr_el, _w('u')); u.set(_w('val'), 'single')
-        if color_hex:
-            col = _lxml.SubElement(rPr_el, _w('color')); col.set(_w('val'), color_hex)
-        sz   = _lxml.SubElement(rPr_el, _w('sz'));   sz.set(_w('val'), fsize)
-        szCs = _lxml.SubElement(rPr_el, _w('szCs')); szCs.set(_w('val'), fsize)
-        _lxml.SubElement(rPr_el, _w('rtl'))
-        t_el = _lxml.SubElement(r_el, _w('t'))
-        t_el.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
-        t_el.text = str(text)
+        def _make_run(txt):
+            r_el   = _lxml.SubElement(para._p, _w('r'))
+            rPr_el = _lxml.SubElement(r_el,   _w('rPr'))
+            rF = _lxml.SubElement(rPr_el, _w('rFonts'))
+            for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a), fname)
+            if bold:
+                b  = _lxml.SubElement(rPr_el, _w('b'));  b.set(_w('val'), '1')
+                bC = _lxml.SubElement(rPr_el, _w('bCs')); bC.set(_w('val'), '1')
+            if underline:
+                u = _lxml.SubElement(rPr_el, _w('u')); u.set(_w('val'), 'single')
+            if color_hex:
+                col = _lxml.SubElement(rPr_el, _w('color')); col.set(_w('val'), color_hex)
+            sz   = _lxml.SubElement(rPr_el, _w('sz'));   sz.set(_w('val'), fsize)
+            szCs = _lxml.SubElement(rPr_el, _w('szCs')); szCs.set(_w('val'), fsize)
+            _lxml.SubElement(rPr_el, _w('rtl'))
+            t_el = _lxml.SubElement(r_el, _w('t'))
+            t_el.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+            t_el.text = txt
+
+        def _make_br():
+            """שורה חדשה בתוך תא (w:br)"""
+            br_r = _lxml.SubElement(para._p, _w('r'))
+            _lxml.SubElement(br_r, _w('br'))
+
+        for i, line in enumerate(lines):
+            if i > 0:
+                _make_br()
+            _make_run(line)
 
     def write_cell(cell, text, bold=False, bg=WHITE, size_heb=9, size_eng=7):
         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
