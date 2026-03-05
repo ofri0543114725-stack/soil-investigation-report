@@ -1874,12 +1874,15 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         lp = doc.add_paragraph()
         lp.paragraph_format.space_before = Pt(4)
         lp.paragraph_format.space_after  = Pt(0)
+        # בנה pPr מחדש לגמרי - ללא bidi, עם right align בלבד
+        # בפסקת LTR: jc=right = ויזואלית ימין (ללא פרדוקס bidi)
         lp_pPr = lp._p.get_or_add_pPr()
-        # RIGHT align - ללא bidi, זה יתן ימין אמיתי
+        # נקה כל jc קיים
+        for old_jc in lp_pPr.findall(_w2('jc')): lp_pPr.remove(old_jc)
+        for old_bi in lp_pPr.findall(_w2('bidi')): lp_pPr.remove(old_bi)
         jc_lp = _lxml2.SubElement(lp_pPr, _w2('jc'))
         jc_lp.set(_w2('val'), 'right')
-        # bidi ON - כדי שהטקסט העברי יהיה RTL
-        _lxml2.SubElement(lp_pPr, _w2('bidi'))
+        # ללא w:bidi - פסקת LTR עם right align = ויזואלית ימין
 
         def leg_word_run(para, word, hl_val):
             """מילה מודגשת עם הדגשת רקע"""
