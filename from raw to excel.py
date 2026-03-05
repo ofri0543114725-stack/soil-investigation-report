@@ -1676,10 +1676,13 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         """מוסיף run עם הגופן הנכון לפי שפה + CS font + RTL"""
         if not text: return
         run = para.add_run(text)
-        run.bold = bold
-        run.underline = underline
-        if color_hex:
-            run.font.color.rgb = RGBColor.from_string(color_hex)
+        # Set bold directly in rPr XML to avoid python-docx setting w:b val="0"
+        if bold:
+            b_el = OxmlElement('w:b')
+            run._r.get_or_add_rPr().append(b_el)
+        if underline:
+            u_el = OxmlElement('w:u'); u_el.set(qn('w:val'), 'single')
+            run._r.get_or_add_rPr().append(u_el)
         use_heb = has_heb(text)
         fname = "David" if use_heb else "Times New Roman"
         fsize = Pt(size_heb) if use_heb else Pt(size_eng)
@@ -1693,11 +1696,17 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         rFonts.set(qn('w:cs'),      fname)  # Critical for Hebrew!
         rFonts.set(qn('w:eastAsia'), fname)
         rPr.insert(0, rFonts)
-        # Set CS font size
+        # CS font size
         for old in rPr.findall(qn('w:szCs')): rPr.remove(old)
         szCs = OxmlElement('w:szCs')
         szCs.set(qn('w:val'), str(int(fsize.pt * 2)))
         rPr.append(szCs)
+        # Color
+        if color_hex:
+            for old in rPr.findall(qn('w:color')): rPr.remove(old)
+            col_el = OxmlElement('w:color')
+            col_el.set(qn('w:val'), color_hex)
+            rPr.append(col_el)
         # RTL run direction
         for old in rPr.findall(qn('w:rtl')): rPr.remove(old)
         rPr.append(OxmlElement('w:rtl'))
@@ -1811,7 +1820,7 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
                 ri += 1
 
         # מקרא - ימין, אותו עמוד
-        lp = make_rtl_para(doc, 'right')
+        lp = make_rtl_para(doc, 'left')  # bidi paragraph: left=visual RIGHT
         lp.paragraph_format.space_before = Pt(4)
         lp.paragraph_format.space_after  = Pt(0)
 
