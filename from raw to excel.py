@@ -1473,13 +1473,7 @@ tab_excel, tab_word = st.tabs(["📊 יצוא Excel", "📄 יצוא Word"])
 
 # ── TPH WORD EXPORT ──────────────────────────────────────────────────────────
 def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
-    """
-    בונה דוח Word ל-TPH מקובץ Excel מעובד.
-    מחלק לדפים, כותרת בכל דף, מיזוג שם קידוח, RTL, צבעים.
-    עברית: David 13, אנגלית/מספרים: Times New Roman 11
-    """
     from openpyxl import load_workbook as lw
-    import re as _re
 
     PAGE_DXA  = {"A4":(11906,16838), "Tabloid":(17280,22320)}
     MARGIN    = 720
@@ -1494,14 +1488,12 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
     page_h = pw if landscape else ph
     content_w = page_w - 2*MARGIN
 
-    # עמודות: שם קידוח | עומק | אנליזה | DRO | ORO | Total
     N_COLS = 6
     ratios = [1480, 1060, 1060, 1680, 1680, 1680]
     rs = sum(ratios)
     col_ws = [int(content_w * r / rs) for r in ratios]
     col_ws[-1] += content_w - sum(col_ws)
 
-    # ── קרא Excel ──────────────────────────────────────────────────────────────
     wb = lw(io.BytesIO(xl_file_bytes), data_only=True)
     ws = wb.active
     all_rows = list(ws.iter_rows(values_only=False))
@@ -1510,23 +1502,63 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
     hdr_rows  = all_rows[:N_HDR]
     data_rows = all_rows[N_HDR:]
 
-    def cv(r,c):
+    def cv(r, c):
         v = hdr_rows[r][c].value
         return str(v).strip() if v is not None else ""
 
+    # VSL ו-TIER1 לכל עמודה
     vsl_vals   = [cv(3,2), cv(3,3), cv(3,4)]
     tier1_vals = [cv(4,2), cv(4,3), cv(4,4)]
+    # אם ריק - קח מעמודה אחרת
+    for i in range(3):
+        if not vsl_vals[i]:
+            vsl_vals[i] = next((v for v in vsl_vals if v), "350")
+        if not tier1_vals[i]:
+            tier1_vals[i] = next((v for v in tier1_vals if v), "350")
 
-    # ── כמה שורות לדף ──────────────────────────────────────────────────────────
-    HDR_H   = 400
-    ROW_H   = 300
-    TITLE_H = 560
-    LEG_H   = 400
+    # ── קבץ שורות לפי קידוח ──────────────────────────────────────────────────
+    # כל קידוח = רשימה של שורות שלו
+    drills = []
+    current_sid = None
+    current_group = []
+    for xl_row in data_rows:
+        sid = xl_row[0].value
+        if sid is not None and str(sid).strip() != "" and sid != current_sid:
+            if current_group:
+                drills.append((current_sid, current_group))
+            current_sid = sid
+            current_group = [xl_row]
+        else:
+            current_group.append(xl_row)
+    if current_group:
+        drills.append((current_sid, current_group))
+
+    # ── כמה שורות נכנסות בדף ────────────────────────────────────────────────
+    HDR_H   = 420
+    ROW_H   = 320
+    TITLE_H = 600
+    LEG_H   = 450
     avail   = page_h - 2*MARGIN - TITLE_H - LEG_H - N_HDR*HDR_H
-    rows_pp = max(8, int(avail / ROW_H))
+    rows_pp = max(6, int(avail / ROW_H))
 
-    chunks      = [data_rows[i:i+rows_pp] for i in range(0, len(data_rows), rows_pp)]
-    total_parts = len(chunks)
+    # ── חלק קידוחים לדפים - לא לפצל קידוח בין דפים ─────────────────────────
+    pages = []
+    current_page = []
+    current_count = 0
+    for sid, drill_rows in drills:
+        n = len(drill_rows)
+        if current_count > 0 and current_count + n > rows_pp:
+            # הקידוח הזה לא נכנס - פתח דף חדש
+            pages.append(current_page)
+            current_page = [(sid, drill_rows)]
+            current_count = n
+        else:
+            current_page.append((sid, drill_rows))
+            current_count += n
+    if current_page:
+        pages.append(current_page)
+
+    total_parts = len(pages)
 
     # ── helpers ────────────────────────────────────────────────────────────────
     def get_color(xl_cell):
@@ -1596,8 +1628,7 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
     def has_heb(text):
         return any('\u05d0' <= c <= '\u05ea' for c in str(text))
 
-    def write_cell(cell, text, bold=False, bg=WHITE, align="center", is_hdr=False):
-        """כתוב תא - David 13 לעברית, Times New Roman 11 לאנגלית"""
+    def write_cell(cell, text, bold=False, bg=WHITE):
         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
         set_bg(cell, bg); set_brd(cell)
         p = cell.paragraphs[0]; p.clear()
@@ -1606,43 +1637,61 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
         bidi = OxmlElement('w:bidi'); pPr.append(bidi)
         txt = str(text) if text is not None else ""
         if not txt: return
-        use_heb = has_heb(txt)
         run = p.add_run(txt)
-        run.bold = bold or is_hdr
-        if use_heb:
-            run.font.name = "David"
-            run.font.size = Pt(13)
+        run.bold = bold
+        if has_heb(txt):
+            run.font.name = "David"; run.font.size = Pt(13)
         else:
-            run.font.name = "Times New Roman"
-            run.font.size = Pt(11)
+            run.font.name = "Times New Roman"; run.font.size = Pt(11)
+
+    def build_header(table):
+        """בנה 5 שורות כותרת"""
+        # שורה 0
+        write_cell(table.cell(0,0), "שם קידוח", bold=True, bg=HDR_BLUE)
+        set_vm(table.cell(0,0), restart=True)
+        write_cell(table.cell(0,1), "עומק", bold=True, bg=HDR_BLUE)
+        set_vm(table.cell(0,1), restart=True)
+        write_cell(table.cell(0,2), "אנליזה", bold=True, bg=HDR_BLUE)
+        for ci,lbl in enumerate(["TPH DRO","TPH ORO","Total TPH"],3):
+            write_cell(table.cell(0,ci), lbl, bold=True, bg=HDR_BLUE)
+        # שורות 1-4
+        sub = [("יחידות",["mg/kg","mg/kg","mg/kg"]),
+               ("CAS",   ["C-10-C-40","C-10-C-40","C-10-C-40"]),
+               ("VSL",   vsl_vals),
+               ("TIER 1",tier1_vals)]
+        for hi,(lbl,vals) in enumerate(sub,1):
+            write_cell(table.cell(hi,0),"",bg=HDR_BLUE); set_vm(table.cell(hi,0))
+            c12=table.cell(hi,1); c12.merge(table.cell(hi,2))
+            write_cell(c12,lbl,bold=True,bg=HDR_BLUE)
+            for ci,v in enumerate(vals,3):
+                write_cell(table.cell(hi,ci),v,bold=True,bg=HDR_BLUE)
 
     # ── בנה Document ───────────────────────────────────────────────────────────
     doc = Document()
     for p in doc.paragraphs:
         p._element.getparent().remove(p._element)
 
-    for part_idx, chunk in enumerate(chunks):
+    for part_idx, page_drills in enumerate(pages):
         pn  = part_idx + 1
         pts = f"(חלק {pn} מתוך {total_parts})" if total_parts > 1 else ""
         title = f"טבלה מספר {table_num} {pts} – תוצאות אנליזות TPH"
 
-        # Section
         section = doc.sections[0] if part_idx == 0 else doc.add_section()
         set_page(section)
 
-        # ── כותרת ──────────────────────────────────────────────────────────────
+        # כותרת
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         pPr = p._p.get_or_add_pPr()
         bidi = OxmlElement('w:bidi'); pPr.append(bidi)
         p.paragraph_format.space_before = Pt(0)
-        p.paragraph_format.space_after  = Pt(6)
+        p.paragraph_format.space_after  = Pt(4)
         run = p.add_run(title)
         run.bold = True; run.underline = True
         run.font.name = "David"; run.font.size = Pt(13)
 
-        # ── בנה טבלה ───────────────────────────────────────────────────────────
-        n_data = len(chunk)
+        # ספור שורות בדף
+        n_data = sum(len(dr) for _, dr in page_drills)
         table  = doc.add_table(rows=N_HDR + n_data, cols=N_COLS)
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         tbl_rtl(table)
@@ -1650,65 +1699,39 @@ def build_tph_word(xl_file_bytes, table_num, page_size="A4", landscape=False):
             for ci in range(N_COLS):
                 set_cw(table.cell(ri,ci), col_ws[ci])
 
-        # שורה 0: כותרות ראשיות
-        # שם קידוח - vmerge rows 0-4
-        write_cell(table.cell(0,0), "שם קידוח", bold=True, bg=HDR_BLUE, is_hdr=True)
-        set_vm(table.cell(0,0), restart=True)
-        # עומק - vmerge rows 0-4
-        write_cell(table.cell(0,1), "עומק", bold=True, bg=HDR_BLUE, is_hdr=True)
-        set_vm(table.cell(0,1), restart=True)
-        # אנליזה - standalone col2 row0
-        write_cell(table.cell(0,2), "אנליזה", bold=True, bg=HDR_BLUE, is_hdr=True)
-        # TPH DRO, ORO, Total
-        for ci,lbl in enumerate(["TPH DRO","TPH ORO","Total TPH"],3):
-            write_cell(table.cell(0,ci), lbl, bold=True, bg=HDR_BLUE, is_hdr=True)
+        build_header(table)
 
-        # שורות 1-4: יחידות/CAS/VSL/TIER1
-        sub_labels = ["יחידות","CAS","VSL","TIER 1"]
-        sub_vals   = [["mg/kg","mg/kg","mg/kg"],
-                      ["C-10-C-40","C-10-C-40","C-10-C-40"],
-                      vsl_vals, tier1_vals]
-        for hi,(lbl,vals) in enumerate(zip(sub_labels,sub_vals),1):
-            write_cell(table.cell(hi,0), "", bg=HDR_BLUE); set_vm(table.cell(hi,0))
-            c12 = table.cell(hi,1); c12.merge(table.cell(hi,2))
-            write_cell(c12, lbl, bold=True, bg=HDR_BLUE, is_hdr=True)
-            for ci,v in enumerate(vals,3):
-                write_cell(table.cell(hi,ci), v, bold=True, bg=HDR_BLUE, is_hdr=True)
-
-        # ── שורות נתונים ───────────────────────────────────────────────────────
+        # נתונים
         has_yel = False; has_org = False
-        prev_sid = None
-        for ri, xl_row in enumerate(chunk):
-            row_idx = N_HDR + ri
-            sid  = xl_row[0].value
-            dep  = xl_row[1].value
+        ri = 0
+        for sid, drill_rows in page_drills:
+            for sub_ri, xl_row in enumerate(drill_rows):
+                row_idx = N_HDR + ri
+                dep = xl_row[1].value
+                if sub_ri == 0:
+                    write_cell(table.cell(row_idx,0), str(sid) if sid else "", bold=True, bg=WHITE)
+                    set_vm(table.cell(row_idx,0), restart=True)
+                else:
+                    write_cell(table.cell(row_idx,0), "", bg=WHITE)
+                    set_vm(table.cell(row_idx,0))
+                cd = table.cell(row_idx,1); cd.merge(table.cell(row_idx,2))
+                write_cell(cd, str(dep) if dep is not None else "", bg=WHITE)
+                for ci in range(3,6):
+                    xl_c = xl_row[ci] if ci < len(xl_row) else None
+                    val  = xl_c.value if xl_c else ""
+                    bg   = get_color(xl_c) if xl_c else None
+                    if bg is None: bg = WHITE
+                    if bg == YELLOW: has_yel = True
+                    if bg == ORANGE: has_org = True
+                    write_cell(table.cell(row_idx,ci), str(val) if val is not None else "", bg=bg)
+                ri += 1
 
-            if sid != prev_sid and sid is not None:
-                write_cell(table.cell(row_idx,0), str(sid), bold=True, bg=WHITE)
-                set_vm(table.cell(row_idx,0), restart=True)
-                prev_sid = sid
-            else:
-                write_cell(table.cell(row_idx,0), "", bg=WHITE)
-                set_vm(table.cell(row_idx,0))
-
-            cd = table.cell(row_idx,1); cd.merge(table.cell(row_idx,2))
-            write_cell(cd, str(dep) if dep is not None else "", bg=WHITE)
-
-            for ci in range(3,6):
-                xl_c = xl_row[ci] if ci < len(xl_row) else None
-                val  = xl_c.value if xl_c else ""
-                bg   = get_color(xl_c) if xl_c else None
-                if bg is None: bg = WHITE
-                if bg == YELLOW: has_yel = True
-                if bg == ORANGE: has_org = True
-                write_cell(table.cell(row_idx,ci), str(val) if val is not None else "", bg=bg)
-
-        # ── מקרא ───────────────────────────────────────────────────────────────
+        # מקרא
         if has_yel or has_org:
             lp = doc.add_paragraph()
             lp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             pPr2 = lp._p.get_or_add_pPr()
-            OxmlElement_bidi = OxmlElement('w:bidi'); pPr2.append(OxmlElement_bidi)
+            bd = OxmlElement('w:bidi'); pPr2.append(bd)
             lp.paragraph_format.space_before = Pt(4)
             if has_yel:
                 r1 = lp.add_run("■ "); r1.font.name="David"; r1.font.size=Pt(13)
@@ -1796,33 +1819,51 @@ with tab_excel:
 
 
 
+
 with tab_word:
+    # הסתר sidebar בטאב Word
+    st.markdown("""<style>
+        [data-testid="stSidebar"] { display: none !important; }
+    </style>""", unsafe_allow_html=True)
+
     st.header("📄 יצוא דוח Word")
     st.caption("העלה קובץ Excel מעובד מטאב Excel, בחר מספר טבלה וצור דוח Word")
     st.markdown("---")
 
-    st.subheader("🛢️ טבלת TPH")
-    wc1, wc2, wc3 = st.columns([4,1,1])
-    with wc1:
-        tph_file = st.file_uploader("העלה קובץ Excel של TPH", type=["xlsx","xls"], key="wtph")
-    with wc2:
-        tph_num  = st.number_input("מספר טבלה", min_value=1, max_value=99, value=1, step=1, key="wtph_num")
-        tph_page = st.selectbox("סוג דף", ["A4","Tabloid"], key="wtph_page")
-    with wc3:
-        tph_land = st.selectbox("כיוון", ["לאורך","לרוחב"], key="wtph_land") == "לרוחב"
+    # ── TPH ──────────────────────────────────────────────────────────────────
+    with st.expander("🛢️ טבלת TPH", expanded=True):
+        wc1, wc2, wc3 = st.columns([4,1,1])
+        with wc1:
+            tph_file = st.file_uploader("העלה קובץ Excel של TPH", type=["xlsx","xls"], key="wtph")
+        with wc2:
+            tph_num  = st.number_input("מספר טבלה", min_value=1, max_value=99, value=1, step=1, key="wtph_num")
+            tph_page = st.selectbox("סוג דף", ["A4","Tabloid"], key="wtph_page")
+        with wc3:
+            tph_land = st.selectbox("כיוון", ["לאורך","לרוחב"], key="wtph_land") == "לרוחב"
+        if tph_file:
+            if st.button("📄 צור דוח Word – TPH", type="primary", use_container_width=True, key="btn_tph"):
+                try:
+                    with st.spinner("⏳ בונה דוח..."):
+                        docx_bytes = build_tph_word(tph_file.read(), int(tph_num), tph_page, tph_land)
+                    st.success("✅ הדוח נוצר!")
+                    st.download_button("⬇️ הורד דוח Word – TPH", data=docx_bytes,
+                        file_name=f"TPH_table_{tph_num}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True, key="dl_tph")
+                except Exception as e:
+                    st.error(f"❌ שגיאה: {e}")
+                    import traceback; st.code(traceback.format_exc())
+        else:
+            st.info("👆 העלה קובץ Excel של TPH")
 
-    if tph_file:
-        if st.button("📄 צור דוח Word – TPH", type="primary", use_container_width=True):
-            try:
-                with st.spinner("⏳ בונה דוח..."):
-                    docx_bytes = build_tph_word(tph_file.read(), int(tph_num), tph_page, tph_land)
-                st.success("✅ הדוח נוצר!")
-                st.download_button("⬇️ הורד דוח Word – TPH", data=docx_bytes,
-                    file_name=f"TPH_table_{tph_num}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True)
-            except Exception as e:
-                st.error(f"❌ שגיאה: {e}")
-                import traceback; st.code(traceback.format_exc())
-    else:
-        st.info("👆 העלה קובץ Excel של TPH")
+    # ── Metals ───────────────────────────────────────────────────────────────
+    with st.expander("⚗️ טבלת Metals"):
+        st.info("🔜 בקרוב")
+
+    # ── VOC+SVOC ─────────────────────────────────────────────────────────────
+    with st.expander("🧪 טבלת VOC+SVOC"):
+        st.info("🔜 בקרוב")
+
+    # ── PFAS ─────────────────────────────────────────────────────────────────
+    with st.expander("🔬 טבלת PFAS"):
+        st.info("🔜 בקרוב")
