@@ -1042,7 +1042,6 @@ def _build_tph_table_data(df, thresh_dict, t1col, t1lbl):
         return False
 
     def get_thresh_local(compound, thresh_dict, t1col):
-        from word_export import _match_thresh_simple
         t = _match_thresh_simple(compound, thresh_dict)
         return t.get("VSL"), t.get(t1col), t.get("cas", "-")
 
