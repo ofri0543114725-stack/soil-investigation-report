@@ -702,7 +702,7 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
             ws.merge_cells(start_row=1,start_column=start_ci,end_row=1,end_column=cols_p[-1])
             c=ws.cell(1,start_ci); c.alignment=Alignment(horizontal="center",vertical="center")
             c.fill=HDR_BLUE_FILL; c.border=thin_border()
-    for row_i,cmp in enumerate(df["compound"].unique(),3):
+    for row_i,cmp in enumerate([c for c in df["compound"].unique() if not str(c).strip().upper().startswith("SUM")],3):
         df_c=df[df["compound"]==cmp]
         vsl_mg,tier1_mg,cas=get_thresh(cmp,thresh_dict,t1col)
         vsl=to_ug(vsl_mg); tier1=to_ug(tier1_mg)
@@ -3016,6 +3016,7 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
     for r in range(3, ws.max_row + 1):
         name = cv(r, 1)
         if not name or name == 'None': continue
+        if str(name).strip().upper().startswith('SUM'): continue  # דלג על שורות SUM
         values = []
         for (dname, depth, ecol, span, kidx) in all_drill_cols:
             values.append((fmt_val(ws.cell(r, ecol).value), cell_bg(r, ecol)))
@@ -3220,7 +3221,7 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
 
         # גובה שורות
         for ri in range(n_rows):
-            h = 420 if ri < 2 else 360
+            h = 600 if ri < 2 else 360
             set_row_h(table.rows[ri]._tr, h, rule='exact')
 
         # ── header שורה 0: vMerge על info cols 0-5, label col6 ──────────────
