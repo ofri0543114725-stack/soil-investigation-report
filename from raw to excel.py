@@ -1502,10 +1502,36 @@ with tab_excel:
         errors = []
         for uf in uploaded_files:
             try:
-                result = parse_als_file(uf.read(), uf.name)
-                for dtype, df in result.items():
-                    if dtype in all_dfs and df is not None and len(df) > 0:
-                        all_dfs[dtype].append(df)
+                df, err = parse_als_file(uf.read(), uf.name)
+                if err:
+                    errors.append(f"{uf.name}: {err}")
+                elif df is not None and len(df) > 0:
+                    # סווג לפי קבוצה לפי שם הקובץ / תוכן
+                    fname_up = uf.name.upper()
+                    if "PFAS" in fname_up or (df["group"].str.upper().str.contains("PFAS").any() if "group" in df.columns else False):
+                        all_dfs["PFAS"].append(df)
+                    elif "VOC" in fname_up or "SVOC" in fname_up or (df["group"].str.upper().str.contains("VOC|SVOC").any() if "group" in df.columns else False):
+                        all_dfs["VOC"].append(df)
+                    elif "METAL" in fname_up or (df["group"].str.upper().str.contains("METAL").any() if "group" in df.columns else False):
+                        all_dfs["Metals"].append(df)
+                    elif "TPH" in fname_up or (df["group"].str.upper().str.contains("TPH").any() if "group" in df.columns else False):
+                        all_dfs["TPH"].append(df)
+                    else:
+                            # קובץ גנרי - סווג כל שורה לפי שם הקבוצה שלה
+                        grp_upper = df["group"].str.upper() if "group" in df.columns else None
+                        for dtype, keywords in [
+                            ("PFAS",   ["PFAS"]),
+                            ("VOC",    ["VOC","SVOC"]),
+                            ("Metals", ["METAL","INORGANIC","ICP"]),
+                            ("TPH",    ["TPH","PETROLEUM","HYDRO"]),
+                        ]:
+                            if grp_upper is not None:
+                                mask = grp_upper.apply(lambda g: any(k in g for k in keywords))
+                                sub = df[mask]
+                                if len(sub) > 0:
+                                    all_dfs[dtype].append(sub)
+                            else:
+                                all_dfs[dtype].append(df)
             except Exception as e:
                 errors.append(f"{uf.name}: {e}")
 
