@@ -3228,7 +3228,10 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
 
         # גובה שורות - auto כמו הקובץ המקורי (300 twips minimum, גדל לפי תוכן)
         for ri in range(n_rows):
-            set_row_h(table.rows[ri]._tr, 300, rule='auto')
+            if ri < 2:
+                set_row_h(table.rows[ri]._tr, 380, rule='exact')  # header
+            else:
+                set_row_h(table.rows[ri]._tr, 360, rule='exact')  # data - exact מונע גלישה לדף
 
         # ── 2 שורות header ────────────────────────────────────────────────────
         # עמודות info (0-4): vMerge - שורה 0+1 מאוחדות
