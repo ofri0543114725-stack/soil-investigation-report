@@ -681,7 +681,7 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
         if v is None: return None
         try: return round(float(v)*1000,6)
         except: return v
-    fixed_hdrs=["שם התרכובת","CAS","VSL [µg/kg]",t1lbl,"יחידות"]
+    fixed_hdrs=["שם התרכובת","CAS","VSL [µg/kg]",t1lbl+"\n[µg/kg]","יחידות"]
     for ci,h in enumerate(fixed_hdrs,1):
         style_hdr(ws.cell(1,ci,h),HDR_BLUE_FILL)
         ws.merge_cells(start_row=1,start_column=ci,end_row=2,end_column=ci)
