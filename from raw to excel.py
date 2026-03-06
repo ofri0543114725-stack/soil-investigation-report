@@ -707,6 +707,7 @@ def write_pfas_sheet(ws, df, thresh_dict, t1col, t1lbl):
         vsl_mg,tier1_mg,cas=get_thresh(cmp,thresh_dict,t1col)
         vsl=to_ug(vsl_mg); tier1=to_ug(tier1_mg)
         unit=df_c.iloc[0]["unit"] if not df_c.empty else "µg/kg"
+        unit=str(unit).replace(" DW","").replace("DW","").strip() if unit else unit
         lor=df_c.iloc[0]["lor"] if not df_c.empty else ""
         style_data(ws.cell(row_i,1,cmp),left_align=True)
         for ci,val in enumerate([cas,vsl,tier1,unit],2): style_data(ws.cell(row_i,ci,val))
@@ -3025,7 +3026,7 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
             'cas':  cv(r, 2),
             'vsl':  fmt_val(cv(r, 3)),
             'tier1': fmt_val(cv(r, 4)),
-            'units': cv(r, 5),
+            'units': cv(r, 5).replace(' DW','').replace('DW','').strip(),
             'lor':  fmt_val(cv(r, 6)),
             'values': values
         })
