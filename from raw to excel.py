@@ -2921,7 +2921,7 @@ def build_voc_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
 
 
 def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
-    """PFAS Word - זהה לסגנון מתכות/TPH"""
+    """PFAS Word - עם VSL ו-TIER 1"""
     import io, re
     from lxml import etree as _lxml
     from docx import Document
@@ -2932,32 +2932,23 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
     from docx.oxml import OxmlElement
     import openpyxl
 
-    HDR_BG = "B7D7F0"   # אותו כחול כמו מתכות/TPH
+    HDR_BG = "B7D7F0"
     WHITE  = "FFFFFF"
     YELLOW = "FFFF00"
     ORANGE = "FFC000"
     _W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
     def _w(tag): return f'{{{_W}}}{tag}'
 
-    SZ_HEB = 9   # David 13pt → half-points = 26, אבל sz ב-Word = half-pt → 13pt=26
-    SZ_ENG = 7   # Times New Roman 11pt → 22 half-pt... תיקון:
-    # David 13pt = sz 26, Times New Roman 11pt = sz 22
-    SZ_HEB_HP = 26   # David 13pt
-    SZ_ENG_HP = 22   # Times New Roman 11pt
-
     def clean_drill_name(name):
-        """S8-1.0 → S-8 | S39 (3.0) → S-39 | S43 (1.0) DUP → S-43 DUP"""
         s = str(name).strip()
-        s = re.sub(r'\s*\(\d+\.?\d*\)', '', s)          # הסר (3.0)
-        s = re.sub(r'-\d+\.?\d*(\s+|$)', r'\1', s)      # הסר -1.0 בסוף
-        s = re.sub(r'^([A-Za-z]+)(\d+)', r'\1-\2', s)   # הוסף מקף S8→S-8
+        s = re.sub(r'\s*\(\d+\.?\d*\)', '', s)
+        s = re.sub(r'-\d+\.?\d*(\s+|$)', r'\1', s)
+        s = re.sub(r'^([A-Za-z]+)(\d+)', r'\1-\2', s)
         return s.strip()
 
     # ── קרא אקסל ──────────────────────────────────────────────────────────────
     wb = openpyxl.load_workbook(io.BytesIO(xl_file_bytes), data_only=True)
     ws = wb.active
-    n_xl_rows = ws.max_row
-    n_xl_cols = ws.max_column
 
     def cv(r, c):
         v = ws.cell(r, c).value
@@ -2970,17 +2961,17 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
                 fg = fill.fgColor
                 if fg.type == 'rgb':
                     h = fg.rgb[-6:].upper()
-                    if h == YELLOW: return YELLOW
+                    if h in (YELLOW, ORANGE): return h
         except: pass
         return None
 
     def fmt_val(raw):
         if raw is None: return ''
         s = str(raw).strip()
-        if not s or s == '-': return s
+        if not s or s in ('', 'None', '-'): return '-' if s == '-' else ''
         if s.startswith('<'): return s
         try:
-            f = float(s)
+            f = float(s.replace(',',''))
             if f == int(f) and abs(f) >= 1000: return f'{int(f):,}'
             elif abs(f) >= 1000: return f'{f:,.1f}'
             else: return s
@@ -2991,70 +2982,86 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
         if not t: return False
         if any('\u05d0' <= c <= '\u05ea' for c in t): return True
         if any(c.isalpha() for c in t): return False
-        return True  # מספרים → David
+        return True
 
-    DRILL_START = 7
+    # מבנה: col1=שם, col2=CAS, col3=VSL, col4=TIER1, col5=יחידות, col6=LOR, col7=label, col8+=קידוחים
+    DRILL_START = 8
+
+    # כותרת TIER 1 - מלאה כפי שכתוב בתא
+    tier1_label = cv(1, 4).replace('\n', '\n') if ws.cell(1,4).value else 'TIER 1'
 
     drills = []
-    for c in range(DRILL_START, n_xl_cols + 1):
-        raw_name = cv(1, c)
-        depth    = cv(2, c)
-        if raw_name:
-            drills.append((clean_drill_name(raw_name), depth))
+    c = DRILL_START
+    while c <= ws.max_column:
+        name = cv(1, c)
+        depth = cv(2, c)
+        if name and name != 'None':
+            # בדוק כמה עמודות עוקבות עם None (merged)
+            j = c + 1
+            while j <= ws.max_column and (cv(1, j) == '' or cv(1, j) == 'None'):
+                j += 1
+            drills.append((clean_drill_name(name), c, j - c))  # (שם, col_start, span)
+            c = j
+        else:
+            c += 1
+
+    # בנה רשימת כל עמודות הקידוח (כולל merged)
+    all_drill_cols = []  # [(clean_name, depth, excel_col)]
+    for dname, col_start, span in drills:
+        for k in range(span):
+            depth_k = cv(2, col_start + k)
+            all_drill_cols.append((dname if k == 0 else None, depth_k, col_start + k, span if k == 0 else 0, k))
 
     compounds = []
-    for r in range(3, n_xl_rows + 1):
+    for r in range(3, ws.max_row + 1):
         name = cv(r, 1)
-        if not name: continue
+        if not name or name == 'None': continue
         values = []
-        for c in range(DRILL_START, n_xl_cols + 1):
-            if c - DRILL_START < len(drills):
-                values.append((fmt_val(ws.cell(r, c).value), cell_bg(r, c)))
+        for (dname, depth, ecol, span, kidx) in all_drill_cols:
+            values.append((fmt_val(ws.cell(r, ecol).value), cell_bg(r, ecol)))
         compounds.append({
-            'name': name, 'cas': cv(r, 2),
-            'threshold': fmt_val(cv(r, 3)), 'units': cv(r, 4),
-            'lor': fmt_val(cv(r, 5)), 'values': values
+            'name': name,
+            'cas':  cv(r, 2),
+            'vsl':  fmt_val(cv(r, 3)),
+            'tier1': fmt_val(cv(r, 4)),
+            'units': cv(r, 5),
+            'lor':  fmt_val(cv(r, 6)),
+            'values': values
         })
 
-    if not compounds or not drills:
-        raise ValueError("לא נמצאו נתונים בקובץ PFAS")
+    if not compounds or not all_drill_cols:
+        raise ValueError("לא נמצאו נתונים")
 
-    n_compounds = len(compounds)
-    n_drills    = len(drills)
+    n_compounds   = len(compounds)
+    n_drill_cols  = len(all_drill_cols)
 
     # ── גודל דף ───────────────────────────────────────────────────────────────
     def set_page(section):
-        if landscape:
-            section.orientation = WD_ORIENT.LANDSCAPE
-            section.page_width  = Inches(16.54)
-            section.page_height = Inches(11.69)
-        else:
-            section.orientation = WD_ORIENT.PORTRAIT
-            section.page_width  = Inches(11.69)
-            section.page_height = Inches(16.54)
+        section.orientation = WD_ORIENT.LANDSCAPE
+        section.page_width  = Inches(16.54)
+        section.page_height = Inches(11.69)
         for a in ('left_margin','right_margin','top_margin','bottom_margin'):
             setattr(section, a, Inches(0.4))
 
-    # ── רוחב עמודות ───────────────────────────────────────────────────────────
     usable_w = int((16.54 - 0.8) * 914400)
 
-    # עמודת שם תרכובת רחבה מספיק ל-52 תווים ב-11pt (~4.5 אינץ')
+    # עמודות info: שם תרכובת, CAS, VSL, TIER1, יחידות, LOR, label
     INFO_W = [
-        int(4.50 * 914400),  # שם תרכובת
-        int(1.10 * 914400),  # CAS - רחב לכל המספרים
-        int(0.70 * 914400),  # ערך סף
+        int(3.80 * 914400),  # שם תרכובת
+        int(0.90 * 914400),  # CAS
+        int(0.70 * 914400),  # VSL
+        int(1.10 * 914400),  # TIER 1
         int(0.55 * 914400),  # יחידות
         int(0.55 * 914400),  # LOR
-        int(0.55 * 914400),  # label: שם הקידוח / עומק
+        int(0.55 * 914400),  # label
     ]
-    N_INFO      = len(INFO_W)
-    info_total  = sum(INFO_W)
+    N_INFO     = len(INFO_W)
+    info_total = sum(INFO_W)
     avail_drill = usable_w - info_total
-    # מקסימום 8 קידוחים לדף - כמו הקובץ המקורי
     drills_per_page = 8
-    drill_w         = int(avail_drill // drills_per_page)
+    drill_w = int(avail_drill // drills_per_page)
 
-    pages       = [drills[i:i+drills_per_page] for i in range(0, n_drills, drills_per_page)]
+    pages = [all_drill_cols[i:i+drills_per_page] for i in range(0, n_drill_cols, drills_per_page)]
     total_pages = len(pages)
 
     # ── עזרי Word ──────────────────────────────────────────────────────────────
@@ -3077,8 +3084,7 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
             brd.append(b)
         tcPr.append(brd)
 
-    def set_row_h(tr, twips, rule='atLeast'):
-        """atLeast = שורה לא תהיה קטנה מ-X אבל יכולה לגדול אם תוכן גדול"""
+    def set_row_h(tr, twips, rule='exact'):
         trPr = tr.find(qn('w:trPr'))
         if trPr is None:
             trPr = OxmlElement('w:trPr'); tr.insert(0, trPr)
@@ -3095,39 +3101,33 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
         if restart: vm.set(qn('w:val'), 'restart')
         tcPr.append(vm)
 
-    def add_run(para, text, bold=False, hp=None, color=None, underline=False):
-        """hp = half-points מפורש. אם None → מחשב לפי has_heb"""
+    def set_hmerge(cell, restart=False):
+        tcPr = cell._tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:hMerge')): tcPr.remove(old)
+        hm = OxmlElement('w:hMerge')
+        if restart: hm.set(qn('w:val'), 'restart')
+        tcPr.append(hm)
+
+    def add_run(para, text, bold=False, color=None):
         if not str(text or '').strip(): return
-        lines = str(text).split('\n')
         use_heb = has_heb(text)
         fname   = 'David' if use_heb else 'Times New Roman'
-        fsize   = str(hp) if hp else (str(SZ_HEB_HP) if use_heb else str(SZ_ENG_HP))
-
-        def _run(txt):
-            r_el = _lxml.SubElement(para._p, _w('r'))
-            rPr  = _lxml.SubElement(r_el,  _w('rPr'))
-            rF   = _lxml.SubElement(rPr,   _w('rFonts'))
-            for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a), fname)
-            if bold:
-                _lxml.SubElement(rPr, _w('b')).set(_w('val'),   '1')
-                _lxml.SubElement(rPr, _w('bCs')).set(_w('val'), '1')
-            if underline:
-                _lxml.SubElement(rPr, _w('u')).set(_w('val'), 'single')
-            if color:
-                _lxml.SubElement(rPr, _w('color')).set(_w('val'), color)
-            _lxml.SubElement(rPr, _w('sz')).set(_w('val'),   fsize)
-            _lxml.SubElement(rPr, _w('szCs')).set(_w('val'), fsize)
-            _lxml.SubElement(rPr, _w('rtl'))
-            t_el = _lxml.SubElement(r_el, _w('t'))
-            t_el.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
-            t_el.text = txt
-
-        def _br():
-            _lxml.SubElement(_lxml.SubElement(para._p, _w('r')), _w('br'))
-
-        for i, line in enumerate(lines):
-            if i > 0: _br()
-            _run(line)
+        fsize   = '26' if use_heb else '22'
+        r_el = _lxml.SubElement(para._p, _w('r'))
+        rPr  = _lxml.SubElement(r_el,  _w('rPr'))
+        rF   = _lxml.SubElement(rPr,   _w('rFonts'))
+        for a in ('ascii','hAnsi','cs','eastAsia'): rF.set(_w(a), fname)
+        if bold:
+            _lxml.SubElement(rPr, _w('b')).set(_w('val'), '1')
+            _lxml.SubElement(rPr, _w('bCs')).set(_w('val'), '1')
+        if color:
+            _lxml.SubElement(rPr, _w('color')).set(_w('val'), color)
+        _lxml.SubElement(rPr, _w('sz')).set(_w('val'),   fsize)
+        _lxml.SubElement(rPr, _w('szCs')).set(_w('val'), fsize)
+        _lxml.SubElement(rPr, _w('rtl'))
+        t_el = _lxml.SubElement(r_el, _w('t'))
+        t_el.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+        t_el.text = str(text)
 
     def write_cell(cell, text, bold=False, bg=WHITE):
         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
@@ -3139,12 +3139,16 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
         pPr.append(OxmlElement('w:bidi'))
         jc = OxmlElement('w:jc'); jc.set(qn('w:val'), 'center'); pPr.append(jc)
         if not str(text or '').strip(): return
-        clr = '000000' if bg != HDR_BG else None  # שחור לתאי data
-        add_run(p, str(text), bold=bold, color=clr)
+        add_run(p, str(text), bold=bold)
 
     def title_segments(txt):
-        parts = re.split(r'([A-Za-z]+)', txt)
-        return [(p, bool(re.match(r'^[A-Za-z]+$', p))) for p in parts if p]
+        parts = re.split(r'([A-Za-z0-9\-\.\,\s]+)', txt)
+        result = []
+        for p in parts:
+            if not p: continue
+            is_eng = bool(re.match(r'^[A-Za-z0-9\-\.\,\s]+$', p))
+            result.append((p, is_eng))
+        return result
 
     def add_title_run(para_p, text, is_eng):
         fname = 'Times New Roman' if is_eng else 'David'
@@ -3166,21 +3170,15 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
     # ── בנה Document ───────────────────────────────────────────────────────────
     doc = Document()
     _WD = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
-    styles = doc.element.find(f'{{{_WD}}}styles')
-    if styles is not None:
-        for b0 in styles.findall(f'.//{{{_WD}}}b[@{{{_WD}}}val="0"]'):
-            b0.getparent().remove(b0)
-        for b0 in styles.findall(f'.//{{{_WD}}}bCs[@{{{_WD}}}val="0"]'):
-            b0.getparent().remove(b0)
     for p in doc.paragraphs:
         p._element.getparent().remove(p._element)
 
     has_yel = False
-    has_org  = False
+    has_org = False
 
-    for part_idx, page_drills in enumerate(pages):
-        n_page_drills = len(page_drills)
-        drill_offset  = sum(len(pages[i]) for i in range(part_idx))
+    for part_idx, page_cols in enumerate(pages):
+        n_page_cols = len(page_cols)
+        col_offset  = sum(len(pages[i]) for i in range(part_idx))
 
         section = doc.sections[0] if part_idx == 0 else doc.add_section()
         set_page(section)
@@ -3188,30 +3186,24 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
         # ── כותרת ─────────────────────────────────────────────────────────────
         pts   = f"(חלק {part_idx+1} מתוך {total_pages})" if total_pages > 1 else ""
         title = f"טבלה מספר {table_num} {pts} – תוצאות אנליזות PFAS".strip()
-
         tp = doc.add_paragraph()
         tp.paragraph_format.space_before   = Pt(0)
         tp.paragraph_format.space_after    = Pt(0)
         tp.paragraph_format.keep_with_next = True
         pPr_t = tp._p.get_or_add_pPr()
-        sp_el = _lxml.SubElement(pPr_t, _w('spacing'))
-        sp_el.set(_w('before'), '0'); sp_el.set(_w('after'), '0')
-        _lxml.SubElement(pPr_t, _w('keepNext'))
         _lxml.SubElement(pPr_t, _w('bidi'))
         _lxml.SubElement(pPr_t, _w('jc')).set(_w('val'), 'center')
         for seg, is_eng in title_segments(title):
             add_title_run(tp._p, seg, is_eng)
 
-        # ── רווח 1.5 שורות ────────────────────────────────────────────────────
         sp_p = doc.add_paragraph()
-        sp_p.paragraph_format.space_before   = Pt(0)
-        sp_p.paragraph_format.space_after    = Pt(0)
-        sp_p.paragraph_format.keep_with_next = True
-        sp_p.paragraph_format.line_spacing   = Pt(19.5)
+        sp_p.paragraph_format.space_before = Pt(0)
+        sp_p.paragraph_format.space_after  = Pt(0)
+        sp_p.paragraph_format.line_spacing = Pt(19.5)
 
         # ── טבלה ──────────────────────────────────────────────────────────────
         n_rows = 2 + n_compounds
-        n_cols = N_INFO + n_page_drills
+        n_cols = N_INFO + n_page_cols
 
         table = doc.add_table(rows=n_rows, cols=n_cols)
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -3226,87 +3218,76 @@ def build_pfas_word(xl_file_bytes, table_num, page_size="A3", landscape=True):
             for wc in table.columns[ci].cells:
                 wc.width = Emu(w)
 
-        # גובה שורות - auto כמו הקובץ המקורי (300 twips minimum, גדל לפי תוכן)
+        # גובה שורות
         for ri in range(n_rows):
-            if ri < 2:
-                set_row_h(table.rows[ri]._tr, 380, rule='exact')  # header
-            else:
-                set_row_h(table.rows[ri]._tr, 360, rule='exact')  # data - exact מונע גלישה לדף
+            h = 420 if ri < 2 else 360
+            set_row_h(table.rows[ri]._tr, h, rule='exact')
 
-        # ── 2 שורות header ────────────────────────────────────────────────────
-        # עמודות info (0-4): vMerge - שורה 0+1 מאוחדות
-        # עמודה 5 (label): שורה 0 = "שם הקידוח", שורה 1 = "עומק" - ללא מיזוג
-        HDR_INFO_LABELS = ['שם התרכובת', 'CAS', 'ערך סף', 'יחידות', 'LOR']
-        for ci in range(N_INFO - 1):  # 0-4: vMerge
-            write_cell(table.cell(0, ci), HDR_INFO_LABELS[ci], bold=True, bg=HDR_BG)
-            write_cell(table.cell(1, ci), '',                   bold=True, bg=HDR_BG)
+        # ── header שורה 0: vMerge על info cols 0-5, label col6 ──────────────
+        INFO_LABELS = ['שם התרכובת', 'CAS', 'VSL\n[µg/kg]', tier1_label, 'יחידות', 'LOR\n[µg/kg]', 'שם הקידוח']
+        INFO2_LABELS = ['', '', '', '', '', '', 'עומק']
+
+        for ci in range(N_INFO - 1):  # 0-5: vMerge
+            write_cell(table.cell(0, ci), INFO_LABELS[ci],  bold=True, bg=HDR_BG)
+            write_cell(table.cell(1, ci), '',               bold=True, bg=HDR_BG)
             set_vmerge(table.cell(0, ci), restart=True)
             set_vmerge(table.cell(1, ci), restart=False)
-        # עמודה 5: שם הקידוח / עומק - 2 שורות נפרדות
-        write_cell(table.cell(0, N_INFO - 1), 'שם הקידוח', bold=True, bg=HDR_BG)
-        write_cell(table.cell(1, N_INFO - 1), 'עומק',      bold=True, bg=HDR_BG)
+        # col 6: שם הקידוח / עומק
+        write_cell(table.cell(0, N_INFO-1), 'שם הקידוח', bold=True, bg=HDR_BG)
+        write_cell(table.cell(1, N_INFO-1), 'עומק',      bold=True, bg=HDR_BG)
 
-        # כתוב header קידוחים + מזג עמודות עם אותו שם
-        # בנה רשימת spans: [(name, depth, start_ci, count), ...]
+        # ── header קידוחים - מזג עמודות עם אותו שם ──────────────────────────
         drill_spans = []
         i = 0
-        while i < n_page_drills:
-            dname, ddepth = page_drills[i]
-            # ספור כמה עמודות עוקבות עם אותו שם
-            j = i + 1
-            while j < n_page_drills and page_drills[j][0] == dname:
-                j += 1
-            drill_spans.append((dname, ddepth, N_INFO + i, j - i))
-            i = j
+        while i < n_page_cols:
+            dname, depth, ecol, span, kidx = page_cols[i]
+            if dname is None:  # continuation of merge
+                i += 1; continue
+            # span מוגדר בעמודה הראשונה של כל קידוח
+            actual_span = span if span > 0 else 1
+            # וודא שלא חורגים מגבולות הדף
+            actual_span = min(actual_span, n_page_cols - i)
+            drill_spans.append((dname, i, actual_span))
+            i += actual_span
 
-        for (dname, ddepth, start_ci, span) in drill_spans:
-            if span == 1:
-                # תא בודד - שם + עומק בשורות נפרדות
-                write_cell(table.cell(0, start_ci), dname,  bold=True, bg=HDR_BG)
-                write_cell(table.cell(1, start_ci), ddepth, bold=True, bg=HDR_BG)
-            else:
-                # מיזוג אופקי של עמודות עם אותו שם - שורה 0
-                write_cell(table.cell(0, start_ci), dname, bold=True, bg=HDR_BG)
-                # הגדר hMerge restart על הראשון
-                tcPr0 = table.cell(0, start_ci)._tc.get_or_add_tcPr()
-                for old in tcPr0.findall(qn('w:hMerge')): tcPr0.remove(old)
-                hm = OxmlElement('w:hMerge'); hm.set(qn('w:val'), 'restart')
-                tcPr0.append(hm)
-                # שאר העמודות - hMerge continue
+        for (dname, start_i, span) in drill_spans:
+            ci = N_INFO + start_i
+            write_cell(table.cell(0, ci), dname, bold=True, bg=HDR_BG)
+            if span > 1:
+                set_hmerge(table.cell(0, ci), restart=True)
                 for k in range(1, span):
-                    write_cell(table.cell(0, start_ci + k), '', bold=True, bg=HDR_BG)
-                    tcPrk = table.cell(0, start_ci + k)._tc.get_or_add_tcPr()
-                    for old in tcPrk.findall(qn('w:hMerge')): tcPrk.remove(old)
-                    hmk = OxmlElement('w:hMerge')
-                    tcPrk.append(hmk)
-                # שורה 1: עומק לכל עמודה בנפרד
-                for k in range(span):
-                    _, dep_k = page_drills[i - span + k] if False else page_drills[drill_spans.index((dname, ddepth, start_ci, span)) * 0 + (start_ci - N_INFO) + k]
-                    write_cell(table.cell(1, start_ci + k), dep_k, bold=True, bg=HDR_BG)
+                    write_cell(table.cell(0, ci+k), '', bold=True, bg=HDR_BG)
+                    set_hmerge(table.cell(0, ci+k), restart=False)
+            # שורה 1: עומק לכל עמודה
+            for k in range(span):
+                if start_i + k < n_page_cols:
+                    _, dep, _, _, _ = page_cols[start_i + k]
+                    write_cell(table.cell(1, ci+k), dep, bold=True, bg=HDR_BG)
 
         # ── שורות נתונים ──────────────────────────────────────────────────────
         for ri, cmp in enumerate(compounds):
             row_idx = ri + 2
-            write_cell(table.cell(row_idx, 0), cmp['name'],      bg=WHITE)
-            write_cell(table.cell(row_idx, 1), cmp['cas'],       bg=WHITE)
-            write_cell(table.cell(row_idx, 2), cmp['threshold'], bg=WHITE)
-            write_cell(table.cell(row_idx, 3), cmp['units'],     bg=WHITE)
-            write_cell(table.cell(row_idx, 4), cmp['lor'],       bg=WHITE)
-            write_cell(table.cell(row_idx, 5), cmp['lor'],       bg=WHITE)
+            write_cell(table.cell(row_idx, 0), cmp['name'],  bg=WHITE)
+            write_cell(table.cell(row_idx, 1), cmp['cas'],   bg=WHITE)
+            write_cell(table.cell(row_idx, 2), cmp['vsl'],   bg=WHITE)
+            write_cell(table.cell(row_idx, 3), cmp['tier1'], bg=WHITE)
+            write_cell(table.cell(row_idx, 4), cmp['units'], bg=WHITE)
+            write_cell(table.cell(row_idx, 5), cmp['lor'],   bg=WHITE)
+            write_cell(table.cell(row_idx, 6), cmp['lor'],   bg=WHITE)
 
-            for di in range(n_page_drills):
-                gdi = drill_offset + di
+            for di, (dname, depth, ecol, span, kidx) in enumerate(page_cols):
+                gdi = col_offset + di
                 ci  = N_INFO + di
                 if gdi < len(cmp['values']):
                     val, fill = cmp['values'][gdi]
-                    bg = YELLOW if fill == YELLOW else ORANGE if fill == ORANGE else WHITE
+                    bg = fill if fill in (YELLOW, ORANGE) else WHITE
                     if bg == YELLOW: has_yel = True
                     if bg == ORANGE: has_org = True
-                    write_cell(table.cell(row_idx, ci), val, bold=(bg==YELLOW), bg=bg)
+                    write_cell(table.cell(row_idx, ci), val, bold=(bg!=WHITE), bg=bg)
                 else:
                     write_cell(table.cell(row_idx, ci), '', bg=WHITE)
 
-        # ── מקרא - זהה לVOC/generic: jc=right ללא bidi, rtl על כל run ──────────
+        # ── מקרא ──────────────────────────────────────────────────────────────
         lp = doc.add_paragraph()
         lp.paragraph_format.space_before = Pt(4)
         lp.paragraph_format.space_after  = Pt(0)
