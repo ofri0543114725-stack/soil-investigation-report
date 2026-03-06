@@ -1597,7 +1597,7 @@ with tab_excel:
                             f"⬇️ {dtype}", data=b.getvalue(),
                             file_name=fname,
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key=f"dl_{dtype.lower()}", use_container_width=True
+                            key=f"excel_dl_{dtype.lower()}", use_container_width=True
                         )
         else:
             st.info("לא נמצאו נתונים בקבצים שהועלו")
