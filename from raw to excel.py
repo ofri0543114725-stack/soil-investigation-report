@@ -1506,32 +1506,36 @@ with tab_excel:
                 if err:
                     errors.append(f"{uf.name}: {err}")
                 elif df is not None and len(df) > 0:
-                    # סווג לפי קבוצה לפי שם הקובץ / תוכן
-                    fname_up = uf.name.upper()
-                    if "PFAS" in fname_up or (df["group"].str.upper().str.contains("PFAS").any() if "group" in df.columns else False):
-                        all_dfs["PFAS"].append(df)
-                    elif "VOC" in fname_up or "SVOC" in fname_up or (df["group"].str.upper().str.contains("VOC|SVOC").any() if "group" in df.columns else False):
-                        all_dfs["VOC"].append(df)
-                    elif "METAL" in fname_up or (df["group"].str.upper().str.contains("METAL").any() if "group" in df.columns else False):
-                        all_dfs["Metals"].append(df)
-                    elif "TPH" in fname_up or (df["group"].str.upper().str.contains("TPH").any() if "group" in df.columns else False):
-                        all_dfs["TPH"].append(df)
+                    # סווג כל שורה לפי שם הקבוצה - תמיכה בכל פורמט
+                    if "group" in df.columns:
+                        grp = df["group"].str.upper().str.strip()
+                        # PFAS
+                        mask_pfas = grp.str.contains("PFAS", na=False)
+                        if mask_pfas.any(): all_dfs["PFAS"].append(df[mask_pfas])
+                        # VOC / SVOC
+                        mask_voc = grp.str.contains("VOC|SVOC|BTEX", na=False)
+                        if mask_voc.any(): all_dfs["VOC"].append(df[mask_voc])
+                        # Metals
+                        mask_met = grp.str.contains("METAL|INORGANIC|ICP|ELEMENT", na=False)
+                        if mask_met.any(): all_dfs["Metals"].append(df[mask_met])
+                        # TPH
+                        mask_tph = grp.str.contains("TPH|PETROLEUM|HYDROCARBON|DRO|ORO", na=False)
+                        if mask_tph.any(): all_dfs["TPH"].append(df[mask_tph])
+                        # שארית לא מסווגת - לפי compound name
+                        classified = mask_pfas | mask_voc | mask_met | mask_tph
+                        rest = df[~classified]
+                        if len(rest) > 0:
+                            # נסה לפי שם התרכובת
+                            cmp = rest["compound"].str.upper().str.strip() if "compound" in rest.columns else None
+                            if cmp is not None:
+                                if cmp.str.contains("PFAS|PERFLUORO|PFOS|PFOA", na=False).any():
+                                    all_dfs["PFAS"].append(rest[cmp.str.contains("PFAS|PERFLUORO|PFOS|PFOA", na=False)])
+                                if cmp.str.contains("TPH|DRO|ORO", na=False).any():
+                                    all_dfs["TPH"].append(rest[cmp.str.contains("TPH|DRO|ORO", na=False)])
                     else:
-                            # קובץ גנרי - סווג כל שורה לפי שם הקבוצה שלה
-                        grp_upper = df["group"].str.upper() if "group" in df.columns else None
-                        for dtype, keywords in [
-                            ("PFAS",   ["PFAS"]),
-                            ("VOC",    ["VOC","SVOC"]),
-                            ("Metals", ["METAL","INORGANIC","ICP"]),
-                            ("TPH",    ["TPH","PETROLEUM","HYDRO"]),
-                        ]:
-                            if grp_upper is not None:
-                                mask = grp_upper.apply(lambda g: any(k in g for k in keywords))
-                                sub = df[mask]
-                                if len(sub) > 0:
-                                    all_dfs[dtype].append(sub)
-                            else:
-                                all_dfs[dtype].append(df)
+                        # אין עמודת group - הוסף לכולם
+                        for dtype in all_dfs:
+                            all_dfs[dtype].append(df)
             except Exception as e:
                 errors.append(f"{uf.name}: {e}")
 
